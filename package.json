@@ -1,0 +1,39 @@
+{
+  "name": "dum-e",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "dev:web": "vite --host 127.0.0.1",
+    "build": "tauri build",
+    "build:web": "tsc --noEmit && vite build",
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test src/model.test.ts",
+    "tauri": "tauri",
+    "test:postgres": "node scripts/test-postgres.mjs",
+    "test:native": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
+    "format": "prettier --write src scripts docs *.json *.ts *.html && cargo fmt --manifest-path src-tauri/Cargo.toml"
+  },
+  "dependencies": {
+    "@codemirror/lang-sql": "^6.10.0",
+    "@codemirror/state": "^6",
+    "@codemirror/view": "^6",
+    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-dialog": "^2",
+    "codemirror": "^6",
+    "lucide-react": "^1.61.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^4",
+    "prettier": "^3.9.10",
+    "typescript": "~5.9.3",
+    "vite": "^6.4.1"
+  }
+}
