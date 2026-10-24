@@ -15,7 +15,7 @@ export function SqlEditor({
 }: {
   value: string;
   onChange: (value: string) => void;
-  onRun: () => void;
+  onRun: (selection?: string) => void;
   driver: Driver;
   tables: Table[];
   theme: string;
@@ -33,16 +33,21 @@ export function SqlEditor({
       state: EditorState.create({
         doc: value,
         extensions: [
-          basicSetup,
           keymap.of([
             {
               key: "Mod-Enter",
               run: () => {
-                callbacks.current.onRun();
+                const selection = view.current?.state.selection.main;
+                const selected =
+                  selection && !selection.empty
+                    ? view.current!.state.sliceDoc(selection.from, selection.to)
+                    : undefined;
+                callbacks.current.onRun(selected);
                 return true;
               },
             },
           ]),
+          basicSetup,
           config.current.of([]),
           EditorView.lineWrapping,
           EditorView.updateListener.of((u) => {

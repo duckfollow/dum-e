@@ -1,0 +1,196 @@
+.explorer-row {
+  position: relative;
+}
+.explorer-row .table-item {
+  width: 100%;
+  padding-right: 35px;
+}
+.explorer-more {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 25px;
+  height: 25px;
+  background: var(--panel);
+  color: var(--secondary);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  opacity: 0;
+  cursor: pointer;
+}
+.explorer-row:hover .explorer-more,
+.explorer-row:focus-within .explorer-more {
+  opacity: 1;
+}
+.schema-name.explorer-row {
+  padding-right: 35px;
+}
+.explorer-menu {
+  position: fixed;
+  z-index: 1000;
+  width: 240px;
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  padding: 6px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px #0005;
+}
+.explorer-menu small {
+  display: block;
+  padding: 7px 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+.explorer-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 9px;
+  background: transparent;
+  color: var(--text);
+  border: 0;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.explorer-menu button:hover,
+.explorer-menu button:focus-visible {
+  background: var(--hover);
+  outline: 1px solid var(--accent);
+}
+.explorer-menu button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.explorer-menu button.danger {
+  color: var(--red, #e17777);
+}
+.explorer-menu hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 5px;
+}
+.explorer-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0007;
+  padding: 24px;
+}
+.explorer-dialog {
+  width: min(560px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  padding: 24px;
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  box-shadow: 0 20px 80px #0005;
+}
+.explorer-dialog header,
+.explorer-dialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.explorer-dialog h2 {
+  font-size: 18px;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+.explorer-dialog header button {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.explorer-dialog p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--secondary);
+}
+.explorer-dialog label {
+  display: block;
+  font-size: 12px;
+  margin: 18px 0;
+  overflow-wrap: anywhere;
+}
+.explorer-dialog input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: var(--editor);
+  color: var(--text);
+  font: inherit;
+}
+.explorer-dialog input:focus {
+  outline: 1px solid var(--accent);
+}
+.explorer-dialog pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 12px/1.6 var(--mono);
+  padding: 12px;
+  background: var(--editor);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.explorer-dialog footer {
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+.object-drop {
+  border: 0;
+  border-radius: 5px;
+  padding: 9px 16px;
+  background: #b53636;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.object-drop:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.object-error,
+.dependency-note {
+  margin: 12px 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-size: 12px;
+}
+.object-error {
+  color: var(--red, #e17777);
+}
+.object-error pre {
+  margin: 5px 0;
+}
+.dependency-note div {
+  margin-top: 5px;
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+@media (hover: none) {
+  .explorer-more {
+    opacity: 1;
+  }
+}

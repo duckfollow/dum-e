@@ -1,3 +1,4 @@
+import type { TableView } from "./table-model";
 export type Driver = "sqlite" | "postgres";
 export interface Profile {
   id: string;
@@ -27,10 +28,18 @@ export interface QueryResult {
   rows: Cell[][];
   elapsedMs: number;
   truncated: boolean;
+  affectedRows?: number;
+}
+export interface ExecutionResult {
+  results: QueryResult[];
+  error?: string;
+  elapsedMs: number;
+  omittedResults: number;
 }
 export interface Connected {
   profile: Profile;
   tables: Table[];
+  schemas?: string[];
 }
 export interface QueryTab {
   id: string;
@@ -38,8 +47,12 @@ export interface QueryTab {
   title: string;
   sql: string;
   table?: Table;
+  tableView?: TableView;
+  overview?: boolean;
+  overviewSchema?: string;
   page: number;
   result?: QueryResult;
+  execution?: ExecutionResult;
   error?: string;
 }
 export const PAGE_SIZE = 200;

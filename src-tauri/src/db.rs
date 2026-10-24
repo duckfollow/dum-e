@@ -86,14 +86,14 @@ pub struct QueryResult {
     pub rows: Vec<Vec<Value>>,
     pub elapsed_ms: u128,
     pub truncated: bool,
+    pub affected_rows: Option<u64>,
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Table {
     pub schema: String,
     pub name: String,
     pub kind: String,
 }
-#[cfg(test)]
 pub fn quoted(identifier: &str) -> String {
     format!("\"{}\"", identifier.replace('"', "\"\""))
 }
@@ -113,7 +113,10 @@ pub fn validate_sql(sql: &str, postgres: bool) -> Result<(), String> {
     }
     .map_err(|e| format!("SQL: {e}"))?;
     if statements.len() != 1 || !matches!(statements[0], Statement::Query(_)) {
-        return Err("This read-only alpha accepts one SELECT or WITH query at a time.".into());
+        return Err(
+            "Table previews accept one SELECT or WITH query. Use a SQL tab to run SQL scripts."
+                .into(),
+        );
     }
     Ok(())
 }
@@ -126,7 +129,7 @@ fn value_limit(value: Value) -> Result<Value, String> {
     }
     Ok(value)
 }
-fn sqlite_cell(row: &sqlx::sqlite::SqliteRow, index: usize) -> Result<Value, String> {
+pub(crate) fn sqlite_cell(row: &sqlx::sqlite::SqliteRow, index: usize) -> Result<Value, String> {
     let raw = row.try_get_raw(index).map_err(|e| e.to_string())?;
     if raw.is_null() {
         return Ok(Value::Null);
@@ -154,7 +157,7 @@ fn sqlite_cell(row: &sqlx::sqlite::SqliteRow, index: usize) -> Result<Value, Str
     };
     value_limit(value)
 }
-fn pg_cell(row: &sqlx::postgres::PgRow, index: usize) -> Result<Value, String> {
+pub(crate) fn pg_cell(row: &sqlx::postgres::PgRow, index: usize) -> Result<Value, String> {
     let raw = row.try_get_raw(index).map_err(|e| e.to_string())?;
     if raw.is_null() {
         return Ok(Value::Null);
@@ -207,22 +210,33 @@ fn pg_cell(row: &sqlx::postgres::PgRow, index: usize) -> Result<Value, String> {
     };
     value_limit(value)
 }
-async fn sqlite(
+pub(crate) async fn sqlite(
     profile: &Profile,
     cancel: Arc<AtomicBool>,
 ) -> Result<sqlx::SqliteConnection, String> {
+    sqlite_mode(profile, cancel, false).await
+}
+pub(crate) async fn sqlite_mode(
+    profile: &Profile,
+    cancel: Arc<AtomicBool>,
+    writable: bool,
+) -> Result<sqlx::SqliteConnection, String> {
     let opts = sqlx::sqlite::SqliteConnectOptions::new()
         .filename(&profile.path)
-        .read_only(true)
+        .read_only(!writable)
         .create_if_missing(false)
         .busy_timeout(Duration::from_secs(3))
         .disable_statement_logging();
     let mut c = sqlx::SqliteConnection::connect_with(&opts)
         .await
         .map_err(|e| e.to_string())?;
-    c.execute("PRAGMA query_only=ON")
-        .await
-        .map_err(|e| e.to_string())?;
+    c.execute(if writable {
+        "PRAGMA query_only=OFF"
+    } else {
+        "PRAGMA query_only=ON"
+    })
+    .await
+    .map_err(|e| e.to_string())?;
     let deadline = Instant::now() + Duration::from_secs(15);
     c.lock_handle()
         .await
@@ -232,7 +246,17 @@ async fn sqlite(
         });
     Ok(c)
 }
-async fn postgres(profile: &Profile, password: &str) -> Result<sqlx::PgConnection, String> {
+pub(crate) async fn postgres(
+    profile: &Profile,
+    password: &str,
+) -> Result<sqlx::PgConnection, String> {
+    postgres_mode(profile, password, false).await
+}
+pub(crate) async fn postgres_mode(
+    profile: &Profile,
+    password: &str,
+    writable: bool,
+) -> Result<sqlx::PgConnection, String> {
     let opts = sqlx::postgres::PgConnectOptions::new_without_pgpass()
         .host(&profile.host)
         .port(profile.port)
@@ -246,7 +270,10 @@ async fn postgres(profile: &Profile, password: &str) -> Result<sqlx::PgConnectio
         })
         .application_name("Dum-E")
         .options([
-            ("default_transaction_read_only", "on"),
+            (
+                "default_transaction_read_only",
+                if writable { "off" } else { "on" },
+            ),
             ("statement_timeout", "15000"),
             ("lock_timeout", "3000"),
         ])
@@ -359,13 +386,23 @@ pub async fn query(
         rows,
         elapsed_ms: start.elapsed().as_millis(),
         truncated,
+        affected_rows: None,
     })
+}
+pub async fn schemas(profile: &Profile, password: &str) -> Result<Vec<String>, String> {
+    profile.validate()?;
+    if profile.driver == "sqlite" {
+        return Ok(vec!["main".into()]);
+    }
+    let mut c = postgres(profile, password).await?;
+    let rows=sqlx::query("SELECT nspname::text AS name FROM pg_catalog.pg_namespace WHERE nspname NOT LIKE 'pg_%' AND nspname <> 'information_schema' AND (pg_has_role(nspowner,'USAGE') OR has_schema_privilege(oid,'USAGE') OR has_schema_privilege(oid,'CREATE')) ORDER BY nspname").fetch_all(&mut c).await.map_err(|e|e.to_string())?;
+    Ok(rows.into_iter().map(|r| r.get("name")).collect())
 }
 pub async fn tables(profile: &Profile, password: &str) -> Result<Vec<Table>, String> {
     let sql = if profile.driver == "sqlite" {
         "SELECT 'main' AS schema, name, type AS kind FROM sqlite_schema WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY name"
     } else {
-        "SELECT table_schema AS schema, table_name AS name, table_type AS kind FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema') ORDER BY table_schema, table_name"
+        "SELECT n.nspname::text AS schema, c.relname::text AS name, CASE c.relkind WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized view' WHEN 'p' THEN 'partitioned table' WHEN 'f' THEN 'foreign table' ELSE 'table' END AS kind FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname <> 'information_schema' AND (pg_has_role(c.relowner,'USAGE') OR has_table_privilege(c.oid,'SELECT') OR has_any_column_privilege(c.oid,'SELECT')) ORDER BY n.nspname,c.relname"
     };
     // Metadata is not capped at the 200-row data preview limit.
     profile.validate()?;

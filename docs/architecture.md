@@ -24,8 +24,14 @@ The database layer has no HTTP service, Node child process, telemetry, or depend
 | `src-tauri/src/demo.sql`    | Fictional workshop data for the sample database                               |
 | `scripts/test-postgres.mjs` | Isolated PostgreSQL integration test lifecycle                                |
 
-## Read-only alpha
+Table inspection lives in `src/TableWorkbench.tsx` with graph identity/layout in `src/table-model.ts` and theme-aware styling in `src/table-workbench.css`. The native `src-tauri/src/metadata.rs` reads driver catalogs in read-only transactions. `table_details` reuses the selected session, returns bounded typed metadata, and never executes the SQL definition preview.
 
-SQL parsing restricts input to one query statement; the drivers enforce read-only behavior independently. SQLite attaches a progress handler for cancellation/deadline, opens existing files read-only, and enables `query_only`. PostgreSQL starts a read-only transaction and configures statement/lock timeouts. This is a database client, not a sandbox for malicious database functions: use database roles with suitable privileges.
+## SQL execution and permissions
 
-Results preserve null and large integer/decimal values; a preview limit never silently labels truncated data as a complete dataset. Unknown PostgreSQL types fail with a suggestion to cast to text. Query tabs are in memory only. All sample writes target only the app-owned sample file.
+The table-preview path accepts one query statement; its drivers enforce read-only behavior independently. SQLite attaches a progress handler for cancellation/deadline, opens existing files read-only, and enables `query_only`. PostgreSQL starts a read-only transaction and configures statement/lock timeouts. This is a database client, not a sandbox for malicious database functions: use database roles with suitable privileges.
+
+Results preserve null and large integer/decimal values; a preview limit never silently labels truncated data as a complete dataset. Unknown PostgreSQL types fail with a suggestion to cast to text. Query tabs are in memory only. Sample creation writes only the app-owned sample file. The SQL editor can write when database/file permissions allow it.
+
+`src-tauri/src/execution.rs` executes driver-native scripts through `raw_sql`, consumes all RETURNING rows past preview limits, and returns statement results plus a separate execution/preview error. Every connected session can invoke `execute_sql`; no app-level mode flag is stored. PostgreSQL roles and SQLite filesystem permissions enforce access. Browsing still uses `run_query`, with independent read-only connections. Connections are run-scoped; transactions cannot span Runs. See [SQL execution](sql-execution.md) for commit and cancellation semantics.
+
+Database-wide relationship inspection uses `src-tauri/src/relations.rs` for bounded bulk catalog reads, `src/database-relations-model.ts` for filtering/layout, and `src/DatabaseRelations.tsx` for the separate overview tab. The graph renderer is shared with focused table Relations. See [Database Relations](database-relations.md).

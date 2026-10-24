@@ -4,18 +4,23 @@
 
 ## Current alpha
 
-- PostgreSQL and SQLite connections, saved on this device.
+- PostgreSQL and SQLite connections saved on this device; Save independently or Save & connect.
 - Test connection; verified TLS for remote PostgreSQL.
 - Optional password storage in macOS Keychain; passwords are never written to the connections file or browser storage.
-- Tables/views explorer and schema refresh.
+- Tables/views and empty PostgreSQL schemas in the explorer, with catalog refresh.
+- Right-click / … object menus: open, copy, SQL templates, rename and confirmed Drop.
+- Table workspace with Data, Structure, Indexes, Relations, and SQL views.
+- Declared incoming/outgoing foreign keys, compound keys, and a focused draggable relationship graph.
+- Database Relations overview across all visible objects, with schema/search filters and cross-schema FK links.
 - SQL editor with syntax highlighting, table-name completions, multiple tabs, and ⌘ Enter.
-- Read-only SELECT / WITH queries, previewed up to 200 rows.
+- SQL available immediately, including DDL/DML and multi-statement scripts; access is enforced by PostgreSQL roles or SQLite file permissions.
+- Selected-SQL execution with ⌘ Enter, statement result switching and affected row counts.
 - Current-page filtering/sorting, table paging, and row inspector.
 - CSV / JSON export through a native save dialog.
 - Light, Dark, and System appearance.
 - A real SQLite sample database via **Explore a sample**.
 
-This alpha is **read-only**. Editing rows, DDL, MongoDB, SSH tunnels, and backup/restore are not implemented. MySQL is intentionally out of scope. SQL tabs/results live in memory and are discarded when the app exits.
+SQL runs directly with the connected database user or SQLite file permissions; no Full SQL toggle is required. GUI row editing, MongoDB, SSH tunnels, and backup/restore are not implemented. Table SQL definitions are read-only previews. MySQL is intentionally out of scope. SQL tabs/results live in memory and are discarded when the app exits.
 
 ## Run locally
 
@@ -27,7 +32,7 @@ npm ci
 npm run dev
 ```
 
-`npm run dev` starts the desktop app and its own Vite server on `127.0.0.1:1430`. Do not start `dev:web` separately first. **Explore a sample** opens a real SQLite file without credentials. Click a table to browse it, or run the sample query with ⌘ Enter.
+`npm run dev` starts the desktop app and its own Vite server on `127.0.0.1:1430`. Do not start `dev:web` separately first. **Explore a sample** opens a real SQLite file without credentials. Click a table to browse it, or run the sample query with ⌘ Enter. Open **mission_assignments → Structure / Relations** to explore primary keys, generated columns, indexes, and real FK links in the updated sample.
 
 ```sh
 npm run dev:web     # UI preview only; database connections require the desktop app
@@ -39,17 +44,17 @@ The packaged app talks directly to databases through native Rust commands. No se
 
 ## Connect to your database
 
-**SQLite:** New connection → SQLite → choose an existing database file → Test connection → Connect. Dum-E does not create or migrate the selected file.
+**SQLite:** New connection → SQLite → choose an existing database file → Test connection → Connect. SQL access follows file and parent-folder permissions; browsing and metadata inspection use read-only connections.
 
 **PostgreSQL:** Enter name, host, port, database, username, and password. Verified TLS is enabled by default. TLS can be disabled for `localhost`, `127.0.0.1`, or `::1` only. Remote connections require a trusted certificate matching the hostname; self-signed/custom CA upload and client certificate authentication are not implemented yet. Remember password is opt-in and uses macOS Keychain.
 
 ## Data and limits
 
-Connection metadata is stored at `~/Library/Application Support/com.duckfollow.dum-e/connections.json`, separately from EDITH. The file does not contain passwords. SQLite sample data is stored in the same folder as `workshop-sample.sqlite`. Closing/disconnecting releases in-memory session credentials; active sessions are not restored automatically on launch.
+Connection metadata is stored at `~/Library/Application Support/com.duckfollow.dum-e/connections.json`, separately from EDITH. The file does not contain passwords. SQLite sample data is stored in the same folder as `workshop-sample-v2.sqlite` (previous sample files stay intact). Closing/disconnecting releases in-memory session credentials; active sessions are not restored automatically on launch.
 
-- One SELECT / WITH statement per Run; SQL is parsed before execution.
-- SQLite files are opened read-only with `query_only=ON`. PostgreSQL uses a read-only transaction and server-side timeouts. Database privileges still determine what data can be read; use an appropriate database role.
-- 200 preview rows, 64 KB per cell, 4 MB per result, 64 KB query text.
+- SQL editor: driver-native single or multiple statements, available on every connection; see [SQL execution](docs/sql-execution.md).
+- Table previews/metadata use read-only connections. The SQL editor uses a separate connection per Run and delegates write permissions to the database/file. Username/password authenticates PostgreSQL; role grants and ownership authorize operations. Dum-E does not elevate privileges.
+- 200 preview rows, 64 KB per cell, 4 MB row previews per Run, 64 KB query text.
 - PostgreSQL connection timeout: 8 seconds; statement timeout: 15 seconds; client request deadline: 20 seconds.
 - SQLite progress callbacks interrupt long-running queries on cancellation/deadline.
 - Cancel stops the UI request and drops the native connection. PostgreSQL can continue server-side until its statement timeout (up to 15 seconds).
@@ -71,3 +76,15 @@ npm run test:postgres
 The last command requires Docker. It creates a disposable PostgreSQL 17 container on a random loopback port, seeds test-only data, runs the PostgreSQL integration test, and stops the container in `finally`. It never uses your saved connections.
 
 See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and [development notes](docs/development.md).
+
+## Table details and relationships
+
+See [database details](docs/database-details.md) for the implementation plan, driver-specific metadata, graph semantics, SQL preview limitations, and the next browsing improvements. No relationship is inferred from column names.
+
+See [SQL execution](docs/sql-execution.md) for mode switching, examples, transaction boundaries and script results.
+
+See [explorer actions](docs/explorer-actions.md) for object menus, dependency checks and supported database operations.
+
+See [saved connections](docs/saved-connections.md) for saving offline, reconnecting and optional Keychain passwords.
+
+See [Database Relations](docs/database-relations.md) for the database-wide overview, filtering and diagram limits.

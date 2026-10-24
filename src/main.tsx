@@ -5,7 +5,6 @@ import {
   Plus,
   Search,
   ChevronRight,
-  ChevronDown,
   Table2,
   FileCode2,
   X,
@@ -35,9 +34,15 @@ import {
   Columns3,
   KeyRound,
   ExternalLink,
+  Save,
+  GitFork,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { SqlEditor } from "./SqlEditor";
+import { TableWorkbench } from "./TableWorkbench";
+import { DatabaseRelations } from "./DatabaseRelations";
+import { DatabaseExplorer } from "./DatabaseExplorer";
+import type { TableView } from "./table-model";
 import { api, desktop } from "./api";
 import {
   cellText,
@@ -51,6 +56,7 @@ import {
   type Connected,
   type QueryTab,
   type QueryResult,
+  type ExecutionResult,
   type Table,
   type Driver,
 } from "./model";
@@ -113,6 +119,7 @@ function App() {
   const [profiles, setProfiles] = useState<Profile[]>([]),
     [connections, setConnections] = useState<Record<string, Connected>>({}),
     [selectedId, setSelectedId] = useState("");
+  const [catalogRevision, setCatalogRevision] = useState(0);
   const [tabs, setTabs] = useState<QueryTab[]>([]),
     [activeId, setActiveId] = useState(""),
     [tableSearch, setTableSearch] = useState(""),
@@ -173,7 +180,7 @@ function App() {
     const tab: QueryTab = {
       id: crypto.randomUUID(),
       profileId: id,
-      title: `Query ${tabsRef.current.filter((t) => !t.table).length + 1}`,
+      title: `Query ${tabsRef.current.filter((t) => !t.table && !t.overview).length + 1}`,
       sql: emptySql,
       page: 0,
     };
@@ -181,7 +188,19 @@ function App() {
     setActiveId(tab.id);
     setSelectedId(id);
   }
-  async function execute(tab: QueryTab, sqlText = tab.sql, page = tab.page) {
+  async function readCatalog(id: string) {
+    const [tables, schemas] = await Promise.all([
+      api<Table[]>("list_tables", { id }),
+      api<string[]>("list_schemas", { id }),
+    ]);
+    return { tables, schemas };
+  }
+  async function execute(
+    tab: QueryTab,
+    sqlText = tab.sql,
+    page = tab.page,
+    selectionOnly = false,
+  ) {
     if (busyRef.current) return;
     if (!connections[tab.profileId]) {
       setMessage("Reconnect to this database before running the query.");
@@ -192,23 +211,81 @@ function App() {
     setSelectedRow(null);
     const requestId = crypto.randomUUID();
     queryId.current = requestId;
-    patch(tab.id, { error: undefined });
+    patch(tab.id, {
+      error: undefined,
+      execution: undefined,
+      result: undefined,
+    });
     try {
-      const result = await api<QueryResult>("run_query", {
-        id: tab.profileId,
-        requestId,
-        sql: sqlText,
-      });
-      patch(tab.id, { result, page, sql: sqlText, error: undefined });
+      if (!tab.table) {
+        const execution = await api<ExecutionResult>("execute_sql", {
+          id: tab.profileId,
+          requestId,
+          sql: sqlText,
+        });
+        patch(tab.id, {
+          execution,
+          result: execution.results.at(-1),
+          page,
+          sql: selectionOnly ? tab.sql : sqlText,
+          error: undefined,
+        });
+      } else {
+        const result = await api<QueryResult>("run_query", {
+          id: tab.profileId,
+          requestId,
+          sql: sqlText,
+        });
+        patch(tab.id, {
+          result,
+          page,
+          sql: selectionOnly ? tab.sql : sqlText,
+          error: undefined,
+        });
+      }
     } catch (e) {
       patch(tab.id, { error: String(e), result: undefined });
     } finally {
+      if (!tab.table) {
+        try {
+          const catalog = await readCatalog(tab.profileId);
+          setConnections((cs) =>
+            cs[tab.profileId]
+              ? { ...cs, [tab.profileId]: { ...cs[tab.profileId], ...catalog } }
+              : cs,
+          );
+        } catch (e) {
+          setMessage(`SQL finished; schema refresh failed: ${String(e)}`);
+        }
+      }
       queryId.current = "";
       busyRef.current = false;
       setBusy("");
     }
   }
-  async function browse(table: Table, conn = connection) {
+  function openOverview(scope = "") {
+    if (!profile) return;
+    const existing = tabsRef.current.find(
+      (t) => t.profileId === profile.id && t.overview,
+    );
+    if (existing) {
+      patch(existing.id, { overviewSchema: scope });
+      setActiveId(existing.id);
+      return;
+    }
+    const tab: QueryTab = {
+      id: crypto.randomUUID(),
+      profileId: profile.id,
+      title: "Database Relations",
+      sql: "",
+      page: 0,
+      overview: true,
+      overviewSchema: scope,
+    };
+    setTabs((ts) => [...ts, tab]);
+    setActiveId(tab.id);
+  }
+  async function browse(table: Table, conn = connection, view?: TableView) {
     if (!conn) return;
     const existing = tabsRef.current.find(
       (t) =>
@@ -217,6 +294,7 @@ function App() {
         t.table?.schema === table.schema,
     );
     if (existing) {
+      if (view) patch(existing.id, { tableView: view });
       setActiveId(existing.id);
       return;
     }
@@ -226,6 +304,7 @@ function App() {
       title: table.name,
       sql: tableSql(table),
       table,
+      tableView: view,
       page: 0,
     };
     setTabs((ts) => [...ts, tab]);
@@ -301,10 +380,10 @@ function App() {
   async function refresh() {
     if (!profile) return;
     try {
-      const tables = await api<Table[]>("list_tables", { id: profile.id });
+      const catalog = await readCatalog(profile.id);
       setConnections((cs) => ({
         ...cs,
-        [profile.id]: { ...cs[profile.id], tables },
+        [profile.id]: { ...cs[profile.id], ...catalog },
       }));
       setToast("Schema refreshed");
     } catch (e) {
@@ -339,7 +418,6 @@ function App() {
           .toLowerCase()
           .includes(tableSearch.toLowerCase()),
       ) || [];
-  const groups = [...new Set(visibleTables.map((t) => t.schema))];
   async function exportData(format: "csv" | "json") {
     if (!result) return;
     try {
@@ -420,6 +498,12 @@ function App() {
                 <RefreshCw size={13} />
               </button>
             </div>
+            <button
+              className="secondary database-relations-button"
+              onClick={() => openOverview()}
+            >
+              <GitFork size={15} /> Database Relations
+            </button>
             <div className="side-search">
               <Search size={14} />
               <input
@@ -430,42 +514,93 @@ function App() {
               />
               <kbd>⌕</kbd>
             </div>
-            <div className="object-tree">
-              {groups.map((schema) => (
-                <section key={schema}>
-                  <div className="schema-name">
-                    <ChevronDown size={13} />
-                    <Database size={14} />
-                    {schema}
-                    <span>
-                      {visibleTables.filter((t) => t.schema === schema).length}
-                    </span>
-                  </div>
-                  {visibleTables
-                    .filter((t) => t.schema === schema)
-                    .map((t) => (
-                      <button
-                        key={`${schema}.${t.name}`}
-                        className={`table-item ${active?.table?.name === t.name && active?.table?.schema === schema ? "active" : ""}`}
-                        onClick={() => void browse(t)}
-                      >
-                        <Table2 size={14} />
-                        <span>{t.name}</span>
-                        {t.kind.toLowerCase().includes("view") && (
-                          <small>view</small>
-                        )}
-                      </button>
-                    ))}
-                </section>
-              ))}
-              {!visibleTables.length && (
-                <p className="sidebar-empty">
-                  {tableSearch
-                    ? "No matching tables."
-                    : "No visible tables yet."}
-                </p>
-              )}
-            </div>
+            <DatabaseExplorer
+              key={profile.id}
+              connection={connection}
+              tables={visibleTables}
+              search={tableSearch}
+              active={active?.table}
+              busy={!!busy}
+              onOverview={openOverview}
+              onOpen={(table, view) => void browse(table, connection, view)}
+              onSql={(sql, title) => {
+                const tab: QueryTab = {
+                  id: crypto.randomUUID(),
+                  profileId: profile.id,
+                  title,
+                  sql,
+                  page: 0,
+                };
+                setTabs((ts) => [...ts, tab]);
+                setActiveId(tab.id);
+              }}
+              onRefresh={() => void refresh()}
+              onNotice={setToast}
+              onMutate={async (sql, target, newName) => {
+                if (busyRef.current)
+                  throw Error("Wait for the current query to finish.");
+                const id = profile.id,
+                  requestId = crypto.randomUUID();
+                busyRef.current = true;
+                setBusy("object-management");
+                queryId.current = requestId;
+                try {
+                  const output = await api<ExecutionResult>("execute_sql", {
+                    id,
+                    requestId,
+                    sql,
+                  });
+                  if (output.error) throw Error(output.error);
+                  const updated = tabsRef.current.flatMap((tab) => {
+                    if (
+                      tab.profileId !== id ||
+                      !tab.table ||
+                      tab.table.schema !== target.schema ||
+                      (target.table && tab.table.name !== target.table.name)
+                    )
+                      return [tab];
+                    if (!newName) return [];
+                    const table = target.table
+                      ? { ...tab.table, name: newName }
+                      : { ...tab.table, schema: newName };
+                    return [
+                      {
+                        ...tab,
+                        table,
+                        title: table.name,
+                        sql: tableSql(table),
+                        page: 0,
+                        result: undefined,
+                        error: undefined,
+                        execution: undefined,
+                      },
+                    ];
+                  });
+                  setTabs(updated);
+                  setActiveId((current) =>
+                    updated.some((t) => t.id === current)
+                      ? current
+                      : updated.at(-1)?.id || "",
+                  );
+                  setCatalogRevision((r) => r + 1);
+                  try {
+                    const catalog = await readCatalog(id);
+                    setConnections((cs) =>
+                      cs[id] ? { ...cs, [id]: { ...cs[id], ...catalog } } : cs,
+                    );
+                  } catch (e) {
+                    setMessage(
+                      `Object changed, but refresh failed. Do not repeat the operation: ${String(e)}`,
+                    );
+                  }
+                  setToast(newName ? "Object renamed" : "Object dropped");
+                } finally {
+                  busyRef.current = false;
+                  setBusy("");
+                  queryId.current = "";
+                }
+              }}
+            />
           </>
         )}
         <div className="sidebar-bottom">
@@ -513,9 +648,21 @@ function App() {
             )}
           </div>
           <div className="top-actions">
-            <span className="readonly-badge">
-              <ShieldCheck size={12} /> Read-only alpha
-            </span>
+            {profile && (
+              <span
+                className="connection-identity"
+                title={
+                  profile.driver === "postgres"
+                    ? `${profile.username}@${profile.host}:${profile.port}/${profile.database}`
+                    : profile.path
+                }
+              >
+                <Database size={13} />
+                {profile.driver === "postgres"
+                  ? `${profile.username} / ${profile.database}`
+                  : "SQLite · local file"}
+              </span>
+            )}
             {profile && (
               <button
                 className="icon-button"
@@ -613,7 +760,7 @@ function App() {
               <div>
                 <ShieldCheck />
                 <b>Explore with confidence</b>
-                <p>Read-only connections in this alpha.</p>
+                <p>Run SQL with the permissions of your database user.</p>
               </div>
             </div>
             <div className="welcome-foot">
@@ -623,7 +770,7 @@ function App() {
           </div>
         ) : (
           <div className="workspace">
-            <div className="tabs" role="tablist" aria-label="SQL tabs">
+            <div className="tabs" role="tablist" aria-label="Workspace tabs">
               {tabs.map((t) => (
                 <div
                   key={t.id}
@@ -663,380 +810,499 @@ function App() {
                 <Plus size={16} />
               </button>
             </div>
-            <div className="query-pane">
-              <div className="editor-toolbar">
-                <div>
-                  <span className="editor-label">
-                    <Terminal size={13} /> SQL EDITOR
-                  </span>
-                  <span className="toolbar-divider" />
-                  <span className="dialect">
-                    {dialectProfile?.driver === "postgres"
-                      ? "PostgreSQL"
-                      : "SQLite"}
-                  </span>
-                </div>
-                <div>
-                  <span className="shortcut">⌘ Enter to run</span>
-                  {busy ? (
-                    <button
-                      className="secondary small"
-                      onClick={() =>
-                        void api("cancel_query", {
-                          requestId: queryId.current,
-                        }).catch((e) => setMessage(String(e)))
-                      }
-                    >
-                      <Square size={11} /> Cancel
-                    </button>
-                  ) : (
-                    <button
-                      className="primary small"
-                      disabled={!profile}
-                      onClick={() => void execute(active)}
-                    >
-                      <Play size={12} fill="currentColor" /> Run query
-                    </button>
-                  )}
-                </div>
-              </div>
-              <SqlEditor
-                key={active.id}
-                readOnly={busy === active.id}
-                value={active.sql}
-                onChange={(sql) => {
-                  setSelectedRow(null);
-                  patch(active.id, {
-                    sql,
-                    table: undefined,
-                    page: 0,
-                    result: undefined,
-                    error: undefined,
-                  });
-                }}
-                onRun={() =>
-                  void execute(
-                    tabsRef.current.find((t) => t.id === activeId) || active,
-                  )
-                }
-                driver={dialectProfile?.driver || "sqlite"}
-                tables={connection?.tables || []}
-                theme={resolved}
+            {active.overview ? (
+              <DatabaseRelations
+                key={`${active.id}-${catalogRevision}`}
+                connectionId={active.profileId}
+                connected={!!profile}
+                scope={active.overviewSchema}
+                onOpen={(table) => void browse(table, connection, "structure")}
               />
-              <div className="editor-foot">
-                <span>
-                  <ShieldCheck size={11} /> SELECT & WITH queries · 200-row
-                  preview · 15s statement limit
-                </span>
-                <span>
-                  UTF-8 <span className="foot-dot">·</span> SQL
-                </span>
-              </div>
-            </div>
-            <div className="result-toolbar">
-              <div className="result-heading">
-                <Table2 size={15} />
-                <b>Results</b>
-                {result && (
-                  <span className="count-badge">
-                    {result.rows.length}
-                    {result.truncated ? "+" : ""}
-                  </span>
-                )}
-                {result && (
-                  <span className="query-timing">
-                    <Check size={12} />
-                    {result.elapsedMs} ms
-                  </span>
-                )}
-              </div>
-              <div className="result-actions">
-                <div className="result-filter">
-                  <Search size={13} />
-                  <input
-                    aria-label="Filter current result page"
-                    placeholder="Filter current page…"
-                    value={filter}
-                    onChange={(e) => setFilter(e.target.value)}
-                    disabled={!result}
+            ) : (
+              <>
+                {active.table && (
+                  <TableWorkbench
+                    key={`${active.id}-${catalogRevision}`}
+                    connectionId={active.profileId}
+                    table={active.table}
+                    connected={!!profile}
+                    visibleTables={connection?.tables || []}
+                    view={active.tableView || "data"}
+                    onView={(tableView) => patch(active.id, { tableView })}
+                    onOpen={(table) => void browse(table)}
                   />
-                  {filter && (
-                    <button
-                      aria-label="Clear result filter"
-                      onClick={() => setFilter("")}
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
-                </div>
-                <span className="toolbar-divider" />
-                <button
-                  className="icon-button"
-                  title="Refresh query"
-                  aria-label="Refresh query"
-                  disabled={!!busy || !profile}
-                  onClick={() => void execute(active)}
+                )}
+                <div
+                  className="data-workspace"
+                  hidden={
+                    !!active.table &&
+                    !!active.tableView &&
+                    active.tableView !== "data"
+                  }
                 >
-                  <RefreshCw size={14} />
-                </button>
-                <div className="export-menu">
-                  <button
-                    className="text-button"
-                    disabled={!result}
-                    onClick={() => void exportData("csv")}
-                    title="Export current result as spreadsheet-safe CSV"
-                  >
-                    <Download size={14} /> CSV
-                  </button>
-                  <button
-                    className="text-button"
-                    disabled={!result}
-                    onClick={() => void exportData("json")}
-                  >
-                    <Braces size={14} /> JSON
-                  </button>
-                </div>
-                <button
-                  className={`icon-button ${inspector ? "accent" : ""}`}
-                  title="Toggle row inspector"
-                  aria-label="Toggle row inspector"
-                  onClick={() => setInspector(!inspector)}
-                >
-                  {inspector ? (
-                    <PanelRightClose size={16} />
-                  ) : (
-                    <PanelRightOpen size={16} />
-                  )}
-                </button>
-              </div>
-            </div>
-            <div className="result-body">
-              {active.error ? (
-                <div className="query-error" role="alert">
-                  <AlertCircle size={24} />
-                  <h3>Let’s take another look.</h3>
-                  <pre>{active.error}</pre>
-                  <p>
-                    Your query didn’t return a result. Update it above and try
-                    again.
-                  </p>
-                </div>
-              ) : busy === active.id ? (
-                <div className="result-empty">
-                  <LoaderCircle className="spin" size={26} />
-                  <h3>Asking your database…</h3>
-                  <p>You can cancel this query at any time.</p>
-                </div>
-              ) : !result ? (
-                <div className="result-empty">
-                  <Terminal size={28} />
-                  <h3>Your next answer starts here.</h3>
-                  <p>
-                    Write a query above and press <kbd>⌘ Enter</kbd> to run it.
-                  </p>
-                  <span className="empty-note">
-                    <ShieldCheck size={12} /> This alpha keeps your data
-                    read-only.
-                  </span>
-                </div>
-              ) : (
-                <>
-                  <div className="data-grid-wrap">
-                    <table className="data-grid">
-                      <thead>
-                        <tr>
-                          <th className="row-number">#</th>
-                          {result.columns.map((c, i) => (
-                            <th key={i}>
-                              <button
-                                title="Sort current result page"
-                                onClick={() =>
-                                  setSort({
-                                    index: i,
-                                    asc: sort?.index === i ? !sort.asc : true,
-                                  })
-                                }
-                              >
-                                <span>
-                                  <b>{c.name}</b>
-                                  <small>{c.dataType || "value"}</small>
-                                </span>
-                                <ArrowUpDown
-                                  size={11}
-                                  className={sort?.index === i ? "accent" : ""}
-                                />
-                              </button>
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map(({ values, index }) => (
-                          <tr
-                            key={index}
-                            className={
-                              selectedRow === index ? "selected-row" : ""
+                  <div className="query-pane">
+                    <div className="editor-toolbar">
+                      <div>
+                        <span className="editor-label">
+                          <Terminal size={13} /> SQL EDITOR
+                        </span>
+                        <span className="toolbar-divider" />
+                        <span className="dialect">
+                          {dialectProfile?.driver === "postgres"
+                            ? "PostgreSQL"
+                            : "SQLite"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="shortcut">⌘ Enter to run</span>
+                        {busy ? (
+                          <button
+                            className="secondary small"
+                            onClick={() =>
+                              void api("cancel_query", {
+                                requestId: queryId.current,
+                              }).catch((e) => setMessage(String(e)))
                             }
-                            tabIndex={0}
-                            aria-label={`Row ${active.page * PAGE_SIZE + index + 1}`}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter" || event.key === " ") {
-                                event.preventDefault();
-                                setSelectedRow(index);
-                                setInspector(true);
-                              }
-                            }}
-                            onClick={() => {
-                              setSelectedRow(index);
-                            }}
-                            onDoubleClick={() => {
-                              setSelectedRow(index);
-                              setInspector(true);
+                          >
+                            <Square size={11} /> Cancel
+                          </button>
+                        ) : (
+                          <button
+                            className="primary small"
+                            disabled={!profile}
+                            onClick={() => void execute(active)}
+                          >
+                            <Play size={12} fill="currentColor" />{" "}
+                            {!active.table ? "Run script" : "Run query"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <SqlEditor
+                      key={active.id}
+                      readOnly={busy === active.id}
+                      value={active.sql}
+                      onChange={(sql) => {
+                        setSelectedRow(null);
+                        patch(active.id, {
+                          sql,
+                          table: undefined,
+                          page: 0,
+                          result: undefined,
+                          execution: undefined,
+                          error: undefined,
+                        });
+                      }}
+                      onRun={(selection) =>
+                        void execute(
+                          tabsRef.current.find((t) => t.id === activeId) ||
+                            active,
+                          selection,
+                          active.page,
+                          !!selection,
+                        )
+                      }
+                      driver={dialectProfile?.driver || "sqlite"}
+                      tables={connection?.tables || []}
+                      theme={resolved}
+                    />
+                    <div className="editor-foot">
+                      <span>
+                        <ShieldCheck size={11} />{" "}
+                        {!active.table
+                          ? "Full SQL · Runs the selected SQL or entire script · Changes apply directly"
+                          : "SELECT & WITH queries · 200-row preview · 15s statement limit"}
+                      </span>
+                      <span>
+                        UTF-8 <span className="foot-dot">·</span> SQL
+                      </span>
+                    </div>
+                  </div>
+                  {active.execution && (
+                    <div className="execution-summary" role="status">
+                      <div>
+                        <Check size={14} />
+                        <b>
+                          {active.execution.error
+                            ? "Execution needs attention"
+                            : "Execution finished"}
+                        </b>
+                        <span>
+                          {active.execution.results.length} completed
+                          statement(s) · {active.execution.elapsedMs} ms
+                        </span>
+                        {active.execution.results.length > 0 && (
+                          <select
+                            aria-label="Statement result"
+                            value={active.execution.results.indexOf(result!)}
+                            onChange={(e) => {
+                              patch(active.id, {
+                                result:
+                                  active.execution!.results[
+                                    Number(e.target.value)
+                                  ],
+                              });
+                              setFilter("");
+                              setSort(null);
+                              setSelectedRow(null);
                             }}
                           >
-                            <td className="row-number">
-                              {active.page * PAGE_SIZE + index + 1}
-                            </td>
-                            {values.map((v, i) => (
-                              <td
-                                key={i}
-                                title={cellText(v)}
-                                className={
-                                  v === null
-                                    ? "null-cell"
-                                    : typeof v === "object"
-                                      ? "json-cell"
-                                      : ""
-                                }
-                              >
-                                {v !== null &&
-                                result.columns[i]?.name === "status" ? (
-                                  <span
-                                    className={`status-chip ${cellText(v).toLowerCase().replaceAll(" ", "-")}`}
-                                  >
-                                    <span />
-                                    {cellText(v)}
-                                  </span>
-                                ) : (
-                                  cellText(v)
-                                )}
-                              </td>
+                            {active.execution.results.map((r, i) => (
+                              <option key={i} value={i}>
+                                Statement {i + 1} ·{" "}
+                                {r.columns.length
+                                  ? `${r.rows.length}${r.truncated ? "+" : ""} preview rows`
+                                  : "No preview rows"}{" "}
+                                · affected: {r.affectedRows ?? "—"}
+                              </option>
                             ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {!rows.length && (
-                      <div className="no-rows">
-                        {filter
-                          ? "No rows match this filter."
-                          : "Query finished. No rows returned."}
+                          </select>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  {inspector && (
-                    <aside className="row-inspector">
-                      <header>
-                        <b>Row inspector</b>
-                        <button
-                          className="icon-button"
-                          aria-label="Close row inspector"
-                          onClick={() => setInspector(false)}
-                        >
-                          <X size={14} />
-                        </button>
-                      </header>
-                      {selectedRow === null ? (
-                        <div className="inspector-empty">
-                          <Columns3 size={24} />
-                          <p>Select a row to see its values.</p>
-                        </div>
-                      ) : (
-                        <>
-                          <span className="inspector-row">
-                            ROW {active.page * PAGE_SIZE + selectedRow + 1}
-                          </span>
-                          {result.columns.map((c, i) => (
-                            <div className="inspect-field" key={i}>
-                              <label>
-                                {c.name}
-                                <small>{c.dataType}</small>
-                              </label>
-                              <pre
-                                className={
-                                  result.rows[selectedRow][i] === null
-                                    ? "null-cell"
-                                    : ""
-                                }
-                              >
-                                {cellText(result.rows[selectedRow][i])}
-                              </pre>
-                            </div>
-                          ))}
-                        </>
+                      {active.execution.omittedResults > 0 && (
+                        <p>
+                          {active.execution.omittedResults} additional statement
+                          results omitted from preview.
+                        </p>
                       )}
-                    </aside>
+                      {active.execution.error && (
+                        <pre role="alert">{active.execution.error}</pre>
+                      )}
+                    </div>
                   )}
-                </>
-              )}
-            </div>
-            <div className="results-footer">
-              <div>
-                {result ? (
-                  <>
-                    <span className="success-dot" />
-                    {rows.length} {filter ? "matching" : "returned"} rows{" "}
-                    <span className="foot-dot">·</span> {result.columns.length}{" "}
-                    columns
-                    {result.truncated && (
-                      <span className="limit-note">
-                        Preview limited to 200 rows
-                      </span>
-                    )}
-                  </>
-                ) : (
-                  <span>Ready when you are.</span>
-                )}
-              </div>
-              <div>
-                {active.table && (
-                  <div className="pagination">
-                    <button
-                      className="icon-button"
-                      aria-label="Previous page"
-                      disabled={!active.page || !!busy}
-                      onClick={() =>
-                        void execute(
-                          active,
-                          tableSql(active.table!, active.page - 1),
-                          active.page - 1,
-                        )
-                      }
-                    >
-                      <ChevronLeft size={14} />
-                    </button>
-                    <span>Page {active.page + 1}</span>
-                    <button
-                      className="icon-button"
-                      aria-label="Next page"
-                      disabled={!result?.truncated || !!busy}
-                      onClick={() =>
-                        void execute(
-                          active,
-                          tableSql(active.table!, active.page + 1),
-                          active.page + 1,
-                        )
-                      }
-                    >
-                      <ChevronRight size={14} />
-                    </button>
+                  <div className="result-toolbar">
+                    <div className="result-heading">
+                      <Table2 size={15} />
+                      <b>Results</b>
+                      {result && (
+                        <span className="count-badge">
+                          {result.rows.length}
+                          {result.truncated ? "+" : ""}
+                        </span>
+                      )}
+                      {result && (
+                        <span className="query-timing">
+                          <Check size={12} />
+                          {result.elapsedMs} ms
+                        </span>
+                      )}
+                    </div>
+                    <div className="result-actions">
+                      <div className="result-filter">
+                        <Search size={13} />
+                        <input
+                          aria-label="Filter current result page"
+                          placeholder="Filter current page…"
+                          value={filter}
+                          onChange={(e) => setFilter(e.target.value)}
+                          disabled={!result}
+                        />
+                        {filter && (
+                          <button
+                            aria-label="Clear result filter"
+                            onClick={() => setFilter("")}
+                          >
+                            <X size={12} />
+                          </button>
+                        )}
+                      </div>
+                      <span className="toolbar-divider" />
+                      <button
+                        className="icon-button"
+                        title="Refresh query"
+                        aria-label="Refresh query"
+                        disabled={!!busy || !profile}
+                        onClick={() => void execute(active)}
+                      >
+                        <RefreshCw size={14} />
+                      </button>
+                      <div className="export-menu">
+                        <button
+                          className="text-button"
+                          disabled={!result}
+                          onClick={() => void exportData("csv")}
+                          title="Export current result as spreadsheet-safe CSV"
+                        >
+                          <Download size={14} /> CSV
+                        </button>
+                        <button
+                          className="text-button"
+                          disabled={!result}
+                          onClick={() => void exportData("json")}
+                        >
+                          <Braces size={14} /> JSON
+                        </button>
+                      </div>
+                      <button
+                        className={`icon-button ${inspector ? "accent" : ""}`}
+                        title="Toggle row inspector"
+                        aria-label="Toggle row inspector"
+                        onClick={() => setInspector(!inspector)}
+                      >
+                        {inspector ? (
+                          <PanelRightClose size={16} />
+                        ) : (
+                          <PanelRightOpen size={16} />
+                        )}
+                      </button>
+                    </div>
                   </div>
-                )}
-                <span className="read-only-note">
-                  <KeyRound size={11} /> Read-only
-                </span>
-              </div>
-            </div>
+                  <div className="result-body">
+                    {active.error ? (
+                      <div className="query-error" role="alert">
+                        <AlertCircle size={24} />
+                        <h3>Let’s take another look.</h3>
+                        <pre>{active.error}</pre>
+                        <p>
+                          {active.table
+                            ? "Update your query above and try again."
+                            : "Some changes may already be committed. Check the database before running this SQL again."}
+                        </p>
+                      </div>
+                    ) : busy === active.id ? (
+                      <div className="result-empty">
+                        <LoaderCircle className="spin" size={26} />
+                        <h3>Asking your database…</h3>
+                        <p>You can cancel this query at any time.</p>
+                      </div>
+                    ) : !result ? (
+                      <div className="result-empty">
+                        <Terminal size={28} />
+                        <h3>Your next answer starts here.</h3>
+                        <p>
+                          Write a query above and press <kbd>⌘ Enter</kbd> to
+                          run it.
+                        </p>
+                        <span className="empty-note">
+                          <ShieldCheck size={12} /> SQL runs with your database
+                          permissions.
+                        </span>
+                      </div>
+                    ) : !result.columns.length ? (
+                      <div className="result-empty">
+                        <Check size={28} />
+                        <h3>Statement completed.</h3>
+                        <p>
+                          Database-reported affected rows:{" "}
+                          {result.affectedRows ?? "—"}
+                        </p>
+                        <span className="empty-note">
+                          SELECT data to inspect the current database state.
+                        </span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="data-grid-wrap">
+                          <table className="data-grid">
+                            <thead>
+                              <tr>
+                                <th className="row-number">#</th>
+                                {result.columns.map((c, i) => (
+                                  <th key={i}>
+                                    <button
+                                      title="Sort current result page"
+                                      onClick={() =>
+                                        setSort({
+                                          index: i,
+                                          asc:
+                                            sort?.index === i
+                                              ? !sort.asc
+                                              : true,
+                                        })
+                                      }
+                                    >
+                                      <span>
+                                        <b>{c.name}</b>
+                                        <small>{c.dataType || "value"}</small>
+                                      </span>
+                                      <ArrowUpDown
+                                        size={11}
+                                        className={
+                                          sort?.index === i ? "accent" : ""
+                                        }
+                                      />
+                                    </button>
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rows.map(({ values, index }) => (
+                                <tr
+                                  key={index}
+                                  className={
+                                    selectedRow === index ? "selected-row" : ""
+                                  }
+                                  tabIndex={0}
+                                  aria-label={`Row ${active.page * PAGE_SIZE + index + 1}`}
+                                  onKeyDown={(event) => {
+                                    if (
+                                      event.key === "Enter" ||
+                                      event.key === " "
+                                    ) {
+                                      event.preventDefault();
+                                      setSelectedRow(index);
+                                      setInspector(true);
+                                    }
+                                  }}
+                                  onClick={() => {
+                                    setSelectedRow(index);
+                                  }}
+                                  onDoubleClick={() => {
+                                    setSelectedRow(index);
+                                    setInspector(true);
+                                  }}
+                                >
+                                  <td className="row-number">
+                                    {active.page * PAGE_SIZE + index + 1}
+                                  </td>
+                                  {values.map((v, i) => (
+                                    <td
+                                      key={i}
+                                      title={cellText(v)}
+                                      className={
+                                        v === null
+                                          ? "null-cell"
+                                          : typeof v === "object"
+                                            ? "json-cell"
+                                            : ""
+                                      }
+                                    >
+                                      {v !== null &&
+                                      result.columns[i]?.name === "status" ? (
+                                        <span
+                                          className={`status-chip ${cellText(v).toLowerCase().replaceAll(" ", "-")}`}
+                                        >
+                                          <span />
+                                          {cellText(v)}
+                                        </span>
+                                      ) : (
+                                        cellText(v)
+                                      )}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          {!rows.length && (
+                            <div className="no-rows">
+                              {filter
+                                ? "No rows match this filter."
+                                : "Query finished. No rows returned."}
+                            </div>
+                          )}
+                        </div>
+                        {inspector && (
+                          <aside className="row-inspector">
+                            <header>
+                              <b>Row inspector</b>
+                              <button
+                                className="icon-button"
+                                aria-label="Close row inspector"
+                                onClick={() => setInspector(false)}
+                              >
+                                <X size={14} />
+                              </button>
+                            </header>
+                            {selectedRow === null ? (
+                              <div className="inspector-empty">
+                                <Columns3 size={24} />
+                                <p>Select a row to see its values.</p>
+                              </div>
+                            ) : (
+                              <>
+                                <span className="inspector-row">
+                                  ROW{" "}
+                                  {active.page * PAGE_SIZE + selectedRow + 1}
+                                </span>
+                                {result.columns.map((c, i) => (
+                                  <div className="inspect-field" key={i}>
+                                    <label>
+                                      {c.name}
+                                      <small>{c.dataType}</small>
+                                    </label>
+                                    <pre
+                                      className={
+                                        result.rows[selectedRow][i] === null
+                                          ? "null-cell"
+                                          : ""
+                                      }
+                                    >
+                                      {cellText(result.rows[selectedRow][i])}
+                                    </pre>
+                                  </div>
+                                ))}
+                              </>
+                            )}
+                          </aside>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  <div className="results-footer">
+                    <div>
+                      {result ? (
+                        <>
+                          <span className="success-dot" />
+                          {rows.length} {filter ? "matching" : "returned"} rows{" "}
+                          <span className="foot-dot">·</span>{" "}
+                          {result.columns.length} columns
+                          {result.truncated && (
+                            <span className="limit-note">
+                              Preview limited to 200 rows
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span>Ready when you are.</span>
+                      )}
+                    </div>
+                    <div>
+                      {active.table && (
+                        <div className="pagination">
+                          <button
+                            className="icon-button"
+                            aria-label="Previous page"
+                            disabled={!active.page || !!busy}
+                            onClick={() =>
+                              void execute(
+                                active,
+                                tableSql(active.table!, active.page - 1),
+                                active.page - 1,
+                              )
+                            }
+                          >
+                            <ChevronLeft size={14} />
+                          </button>
+                          <span>Page {active.page + 1}</span>
+                          <button
+                            className="icon-button"
+                            aria-label="Next page"
+                            disabled={!result?.truncated || !!busy}
+                            onClick={() =>
+                              void execute(
+                                active,
+                                tableSql(active.table!, active.page + 1),
+                                active.page + 1,
+                              )
+                            }
+                          >
+                            <ChevronRight size={14} />
+                          </button>
+                        </div>
+                      )}
+                      <span className="read-only-note">
+                        <KeyRound size={11} />{" "}
+                        {active.table
+                          ? "Table preview"
+                          : "Database permissions"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
         <footer className="statusbar">
@@ -1066,8 +1332,17 @@ function App() {
       {modal && (
         <ConnectionDialog
           profile={modal}
+          saved={profiles.some((p) => p.id === modal.id)}
           onClose={() => setModal(null)}
           onConnected={didConnect}
+          onSaved={(saved) => {
+            setProfiles((ps) => [
+              ...ps.filter((p) => p.id !== saved.id),
+              saved,
+            ]);
+            setModal(null);
+            setToast("Connection saved. Connect whenever you are ready.");
+          }}
         />
       )}
       {toast && (
@@ -1081,12 +1356,16 @@ function App() {
 }
 function ConnectionDialog({
   profile: initial,
+  saved,
   onClose,
   onConnected,
+  onSaved,
 }: {
   profile: Profile;
+  saved: boolean;
   onClose: () => void;
   onConnected: (c: Connected) => Promise<void>;
+  onSaved: (p: Profile) => void;
 }) {
   const [p, setP] = useState(initial),
     [password, setPassword] = useState(""),
@@ -1119,6 +1398,24 @@ function ConnectionDialog({
         change({ path, name: p.name || path.split("/").at(-1) || "SQLite" });
     } catch (e) {
       setError(String(e));
+    }
+  }
+  async function saveOnly() {
+    if (working) return;
+    if (!dialog.current?.querySelector("form")?.reportValidity()) return;
+    setWorking("save");
+    setError("");
+    try {
+      const saved = await api<Profile>("save_connection", {
+        profile: p,
+        password: password || null,
+      });
+      setPassword("");
+      onSaved(saved);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setWorking("");
     }
   }
   async function submit(testOnly: boolean) {
@@ -1165,8 +1462,10 @@ function ConnectionDialog({
             <PlugZap size={21} />
           </div>
           <div>
-            <span className="eyebrow">A NEW CONNECTION</span>
-            <h2>Meet your database.</h2>
+            <span className="eyebrow">
+              {saved ? "SAVED CONNECTION" : "A NEW CONNECTION"}
+            </span>
+            <h2>{saved ? "Connection settings." : "Meet your database."}</h2>
           </div>
           <button
             type="button"
@@ -1234,7 +1533,9 @@ function ConnectionDialog({
                   <FolderOpen size={16} /> Browse
                 </button>
               </div>
-              <small>An existing SQLite file. Dum-E opens it read-only.</small>
+              <small>
+                An existing SQLite file. SQL access follows file permissions.
+              </small>
             </label>
           ) : (
             <>
@@ -1288,8 +1589,8 @@ function ConnectionDialog({
                     type="password"
                     autoComplete="off"
                     placeholder={
-                      p.rememberPassword
-                        ? "Saved in Keychain"
+                      initial.rememberPassword
+                        ? "Leave blank to keep saved password"
                         : "Database password"
                     }
                     value={password}
@@ -1351,8 +1652,9 @@ function ConnectionDialog({
           <div className="privacy-note">
             <ShieldCheck size={14} />
             <p>
-              Connections stay on this device. Queries run read-only in this
-              alpha.
+              Save keeps settings on this device without connecting. Passwords
+              are stored only when Remember password is selected. SQL follows
+              database or file permissions.
             </p>
           </div>
         </div>
@@ -1380,6 +1682,19 @@ function ConnectionDialog({
               Cancel
             </button>
             <button
+              type="button"
+              className="secondary"
+              disabled={!!working || !desktop}
+              onClick={() => void saveOnly()}
+            >
+              {working === "save" ? (
+                <LoaderCircle className="spin" size={14} />
+              ) : (
+                <Save size={14} />
+              )}{" "}
+              Save
+            </button>
+            <button
               className="primary"
               disabled={!!working || !desktop}
               type="submit"
@@ -1389,7 +1704,7 @@ function ConnectionDialog({
               ) : (
                 <ArrowRight size={14} />
               )}{" "}
-              Connect
+              Save & connect
             </button>
           </div>
         </footer>

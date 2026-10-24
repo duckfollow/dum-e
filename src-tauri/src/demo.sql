@@ -20,4 +20,26 @@ INSERT INTO equipment VALUES (1,'Arc reactor','Power','{"generation":2,"output":
 CREATE TABLE query_notes (id INTEGER PRIMARY KEY, title TEXT, sql_text TEXT);
 INSERT INTO query_notes VALUES (1,'Active missions','SELECT * FROM missions WHERE status = ''In progress'';');
 CREATE VIEW active_missions AS SELECT * FROM missions WHERE status='In progress';
+CREATE TABLE mission_assignments (
+ mission_id INTEGER NOT NULL,
+ crew_id INTEGER NOT NULL,
+ role TEXT NOT NULL DEFAULT 'owner' CHECK (role IN ('owner','reviewer')),
+ active INTEGER NOT NULL DEFAULT 1,
+ display_label TEXT GENERATED ALWAYS AS ('mission-' || mission_id) VIRTUAL,
+ PRIMARY KEY(mission_id,crew_id),
+ FOREIGN KEY(mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+ FOREIGN KEY(crew_id) REFERENCES crew(id) ON DELETE RESTRICT
+) WITHOUT ROWID, STRICT;
+INSERT INTO mission_assignments(mission_id,crew_id,role) VALUES (1,1,'owner'),(1,3,'reviewer'),(2,3,'owner'),(3,4,'owner'),(7,3,'owner');
+CREATE UNIQUE INDEX idx_assignment_owner ON mission_assignments(mission_id) WHERE role='owner';
+CREATE INDEX idx_assignment_crew ON mission_assignments(crew_id,mission_id);
+CREATE TABLE mission_events (
+ id INTEGER PRIMARY KEY,
+ mission_id INTEGER NOT NULL,
+ crew_id INTEGER NOT NULL,
+ parent_event_id INTEGER REFERENCES mission_events(id),
+ message TEXT NOT NULL,
+ FOREIGN KEY(mission_id,crew_id) REFERENCES mission_assignments(mission_id,crew_id) ON UPDATE CASCADE ON DELETE CASCADE
+);
+INSERT INTO mission_events VALUES (1,1,1,NULL,'Flight systems inspection started'),(2,1,1,1,'Stabilizers calibrated'),(3,2,3,NULL,'Diagnostics complete');
 COMMIT;

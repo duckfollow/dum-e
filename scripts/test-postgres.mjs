@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { setTimeout } from "node:timers/promises";
 const name = `dum-e-test-${randomUUID().slice(0, 8)}`;
@@ -23,7 +24,9 @@ try {
   let ready = false;
   for (let i = 0; i < 100; i++) {
     try {
-      docker("exec", name, "pg_isready", "-U", "postgres");
+      // The image starts a temporary Unix-socket server during initialization.
+      // Wait for TCP so fixtures cannot race that server shutting down.
+      docker("exec", name, "pg_isready", "-h", "127.0.0.1", "-U", "postgres");
       ready = true;
       break;
     } catch {
@@ -37,8 +40,14 @@ try {
     "psql",
     "-U",
     "postgres",
+    "-v",
+    "ON_ERROR_STOP=1",
     "-c",
-    "CREATE TABLE dum_e_test_items (id integer PRIMARY KEY, name text); INSERT INTO dum_e_test_items VALUES (1, 'read-only fixture');",
+    "CREATE TABLE dum_e_test_items (id integer PRIMARY KEY, name text); INSERT INTO dum_e_test_items VALUES (1, 'read-only fixture');" +
+      readFileSync(
+        new URL("./fixtures/postgres-metadata.sql", import.meta.url),
+        "utf8",
+      ),
   );
   const port = docker("port", name, "5432/tcp").split(":").at(-1);
   const result = spawnSync(
@@ -48,7 +57,7 @@ try {
       "--manifest-path",
       "src-tauri/Cargo.toml",
       "--lib",
-      "postgres_real_connection_types_and_readonly",
+      "postgres_real",
       "--",
       "--ignored",
     ],

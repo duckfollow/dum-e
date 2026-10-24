@@ -1,4 +1,7 @@
 mod db;
+mod execution;
+mod metadata;
+mod relations;
 use db::{Profile, QueryResult, Table};
 use serde::Serialize;
 use std::{
@@ -26,6 +29,7 @@ struct Workspace {
 struct Connected {
     profile: Profile,
     tables: Vec<Table>,
+    schemas: Vec<String>,
 }
 fn saved_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -118,6 +122,46 @@ fn list_connections(
     read_profiles(&app)
 }
 #[tauri::command]
+async fn save_connection(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Workspace>,
+    mut profile: Profile,
+    password: Option<String>,
+) -> Result<Profile, String> {
+    profile.validate()?;
+    if state
+        .sessions
+        .lock()
+        .map_err(|_| "Workspace busy")?
+        .contains_key(&profile.id)
+    {
+        return Err("Disconnect before changing a saved connection.".into());
+    }
+    if profile.driver == "sqlite" {
+        profile.remember_password = false;
+        let previously_postgres = {
+            let _guard = state.storage.lock().map_err(|_| "Storage busy")?;
+            read_profiles(&app)?
+                .iter()
+                .any(|p| p.id == profile.id && p.driver == "postgres")
+        };
+        if previously_postgres {
+            save_password(profile.id.clone(), String::new(), false).await?;
+        }
+    }
+    if profile.driver == "postgres" {
+        if !profile.remember_password {
+            save_password(profile.id.clone(), String::new(), false).await?;
+        } else if let Some(password) = password {
+            save_password(profile.id.clone(), password, true).await?;
+        }
+        // None preserves an existing Keychain entry; saving does not contact the server.
+    }
+    let _guard = state.storage.lock().map_err(|_| "Storage busy")?;
+    persist(&app, &profile)?;
+    Ok(profile)
+}
+#[tauri::command]
 async fn test_connection(profile: Profile, password: String) -> Result<(), String> {
     db::test_connection(&profile, &password).await
 }
@@ -140,6 +184,7 @@ async fn connect_database(
         }
     };
     let tables = db::tables(&profile, &password).await?;
+    let schemas = db::schemas(&profile, &password).await?;
     if profile.driver == "postgres" {
         save_password(
             profile.id.clone(),
@@ -159,7 +204,11 @@ async fn connect_database(
             password,
         },
     );
-    Ok(Connected { profile, tables })
+    Ok(Connected {
+        profile,
+        tables,
+        schemas,
+    })
 }
 fn session(state: &Workspace, id: &str) -> Result<Session, String> {
     state
@@ -188,6 +237,66 @@ fn disconnect_database(state: tauri::State<Workspace>, id: String) -> Result<(),
 async fn list_tables(state: tauri::State<'_, Workspace>, id: String) -> Result<Vec<Table>, String> {
     let s = session(&state, &id)?;
     db::tables(&s.profile, &s.password).await
+}
+#[tauri::command]
+async fn list_schemas(
+    state: tauri::State<'_, Workspace>,
+    id: String,
+) -> Result<Vec<String>, String> {
+    let s = session(&state, &id)?;
+    db::schemas(&s.profile, &s.password).await
+}
+#[tauri::command]
+async fn database_relations(
+    state: tauri::State<'_, Workspace>,
+    id: String,
+) -> Result<relations::DatabaseRelations, String> {
+    let s = session(&state, &id)?;
+    relations::inspect(&s.profile, &s.password).await
+}
+#[tauri::command]
+async fn table_details(
+    state: tauri::State<'_, Workspace>,
+    id: String,
+    table: Table,
+) -> Result<metadata::TableDetails, String> {
+    let session = session(&state, &id)?;
+    metadata::inspect(&session.profile, &session.password, &table).await
+}
+#[tauri::command]
+async fn execute_sql(
+    state: tauri::State<'_, Workspace>,
+    id: String,
+    request_id: String,
+    sql: String,
+) -> Result<execution::ExecutionResult, String> {
+    uuid::Uuid::parse_str(&request_id).map_err(|_| "Invalid query ID")?;
+    let flag = Arc::new(AtomicBool::new(false));
+    let s;
+    {
+        let mut map = state.running.lock().map_err(|_| "Workspace busy")?;
+        s = session(&state, &id)?;
+        if map.values().any(|(connection, _)| connection == &id)
+            || map.contains_key(&request_id)
+            || map.len() >= 4
+        {
+            return Err("Another query is still running.".into());
+        }
+        map.insert(request_id.clone(), (id, flag.clone()));
+    }
+    let _guard = QueryGuard {
+        running: &state.running,
+        id: request_id,
+        flag: flag.clone(),
+    };
+    let work = execution::execute(&s.profile, &s.password, &sql, flag.clone());
+    tokio::pin!(work);
+    let mut ticks = tokio::time::interval(Duration::from_millis(50));
+    let deadline = tokio::time::sleep(Duration::from_secs(20));
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {result=&mut work=>return result, _=&mut deadline=>return Err("Execution exceeded 20 seconds. Some changes may already be committed; inspect the database before retrying.".into()), _=ticks.tick()=>{if flag.load(Ordering::Relaxed){return Err("Execution cancelled. Some changes may already be committed; inspect the database before retrying.".into());}}}
+    }
 }
 struct QueryGuard<'a> {
     running: &'a Mutex<HashMap<String, (String, Arc<AtomicBool>)>>,
@@ -254,13 +363,13 @@ async fn open_sample(
         .path()
         .app_data_dir()
         .map_err(|e| e.to_string())?
-        .join("workshop-sample.sqlite");
+        .join("workshop-sample-v2.sqlite");
     std::fs::create_dir_all(path.parent().ok_or("Invalid data folder")?)
         .map_err(|e| e.to_string())?;
     db::demo_file(&path).await?;
     let profile = Profile {
-        id: "d00e0000-0000-4000-8000-000000000001".into(),
-        name: "Workshop · sample".into(),
+        id: "d00e0000-0000-4000-8000-000000000002".into(),
+        name: "Workshop relations · sample".into(),
         driver: "sqlite".into(),
         host: String::new(),
         port: 5432,
@@ -327,11 +436,16 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             list_connections,
+            save_connection,
             test_connection,
             connect_database,
             disconnect_database,
             list_tables,
+            list_schemas,
+            table_details,
+            database_relations,
             run_query,
+            execute_sql,
             cancel_query,
             open_sample,
             export_result
