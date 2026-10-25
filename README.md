@@ -1,6 +1,18 @@
 # Dum-E
 
-**Your little database helper.** A small, local-first database workspace for macOS, built with Tauri, React, TypeScript, and Rust.
+**Your little database helper.** An open-source, local-first database workspace for macOS, built with Tauri, React, TypeScript, and Rust.
+
+[Download](https://github.com/duckfollow/dum-e/releases) · [Report a bug](https://github.com/duckfollow/dum-e/issues) · [Contribute](CONTRIBUTING.md)
+
+## License
+
+Dum-E is available under the [MIT License](LICENSE). Third-party components retain their respective licenses; see [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
+
+## Install
+
+The current alpha targets **Apple Silicon Macs running macOS 13.5 or later**. Download the DMG from [Releases](https://github.com/duckfollow/dum-e/releases), open it, and drag Dum-E into Applications.
+
+The downloadable alpha is ad-hoc signed and **not notarized by Apple**. Gatekeeper may block it, including showing a “damaged” warning. If blocked, [build from source](#run-locally). Other platforms and Intel Macs are not validated.
 
 ## Current alpha
 
@@ -30,7 +42,8 @@ SQL runs directly with the connected database user or SQLite file permissions; n
 Requirements: macOS 13.5+, Node.js 22.18+ or 24+, npm, Rust stable, and Xcode Command Line Tools. macOS is the current development target; other platforms are not validated.
 
 ```sh
-cd /Users/tankps/Documents/project-github/dum-e
+git clone https://github.com/duckfollow/dum-e.git
+cd dum-e
 npm ci
 npm run dev
 ```

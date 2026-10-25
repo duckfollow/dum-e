@@ -2,6 +2,8 @@
 name = "dum-e"
 version = "0.1.0-alpha.1"
 description = "Your little database helper"
+license = "MIT"
+repository = "https://github.com/duckfollow/dum-e"
 edition = "2021"
 [lib]
 name = "dum_e_lib"

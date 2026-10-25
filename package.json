@@ -35,5 +35,10 @@
     "prettier": "^3.9.10",
     "typescript": "~5.9.3",
     "vite": "^6.4.1"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/duckfollow/dum-e.git"
   }
 }
