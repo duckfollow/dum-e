@@ -38,18 +38,28 @@ fn empty() -> QueryResult {
         elapsed_ms: 0,
         truncated: false,
         affected_rows: None,
+        json_raw: Default::default(),
     }
 }
 // Continue consuming after preview limits. Breaking a RETURNING stream could leave
 // writes incomplete or report success before the server commits the script.
-fn retain(row: Vec<serde_json::Value>, current: &mut QueryResult, bytes: &mut usize) {
+fn retain(
+    row: Vec<serde_json::Value>,
+    raw: std::collections::BTreeMap<usize, String>,
+    current: &mut QueryResult,
+    bytes: &mut usize,
+) {
     let size = serde_json::to_vec(&row)
         .map(|v| v.len())
-        .unwrap_or(usize::MAX);
+        .unwrap_or(usize::MAX)
+        .saturating_add(raw.values().map(String::len).sum::<usize>());
     if current.rows.len() >= 200 || bytes.saturating_add(size) > 4 * 1024 * 1024 {
         current.truncated = true;
     } else {
         *bytes += size;
+        if !raw.is_empty() {
+            current.json_raw.insert(current.rows.len(), raw);
+        }
         current.rows.push(row);
     }
 }
@@ -99,7 +109,7 @@ pub async fn execute(
     let mut bytes = 0usize;
     let mut preview_error = None;
     macro_rules! consume {
-        ($connection:expr, $cell:path) => {{
+        ($connection:expr, $cell:path, $raw:path) => {{
             let mut stream = sqlx::raw_sql(sql).fetch_many($connection);
             loop {
                 if cancel.load(Ordering::Relaxed) { output.error = Some("Execution cancelled. Some changes may already be committed; inspect the database before retrying.".into()); break; }
@@ -114,7 +124,10 @@ pub async fn execute(
                         }
                         if output.results.len() >= 100 { continue; }
                         match (0..row.len()).map(|i| $cell(&row,i)).collect::<Result<Vec<_>,_>>() {
-                            Ok(cells) => retain(cells, &mut current, &mut bytes),
+                            Ok(cells) => match $raw(&row) {
+                                Ok(raw) => retain(cells,raw,&mut current,&mut bytes),
+                                Err(e) => { current.truncated=true; preview_error=Some(e); }
+                            },
                             Err(e) => { current.truncated=true; preview_error=Some(e); }
                         }
                     }
@@ -135,10 +148,10 @@ pub async fn execute(
     }
     if profile.driver == "sqlite" {
         let mut c = db::sqlite_mode(profile, cancel.clone(), true).await?;
-        consume!(&mut c, db::sqlite_cell);
+        consume!(&mut c, db::sqlite_cell, db::sqlite_json_raw);
     } else {
         let mut c = db::postgres_mode(profile, password, true).await?;
-        consume!(&mut c, db::pg_cell);
+        consume!(&mut c, db::pg_cell, db::pg_json_raw);
     }
     if let Some(e) = preview_error {
         let note=format!("SQL execution finished, but part of the result could not be previewed: {e}. Do not rerun writes just to refresh a preview.");

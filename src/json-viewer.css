@@ -1,0 +1,259 @@
+.json-cell-button {
+  display: inline-flex;
+  justify-content: flex-start;
+  gap: 6px;
+  max-width: 260px;
+  padding: 3px 7px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 7%, transparent);
+  font: 11px var(--mono);
+  vertical-align: middle;
+}
+.json-cell-button > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.json-cell-button > svg {
+  flex: 0 0 auto;
+}
+.json-cell-button:hover {
+  border-color: var(--blue);
+}
+.json-cell-button.is-sql-null {
+  color: var(--muted);
+  background: transparent;
+}
+.json-viewer {
+  width: min(980px, 92vw);
+  height: min(740px, 86vh);
+  max-height: 90vh;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.json-viewer[open] {
+  display: flex;
+  flex-direction: column;
+}
+.json-viewer::backdrop {
+  background: #0008;
+}
+.json-viewer-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--line);
+}
+.json-viewer-heading > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.json-viewer-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-radius: 9px;
+}
+.json-viewer h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.json-viewer-heading p {
+  display: flex;
+  gap: 7px;
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.json-viewer-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.json-viewer-tabs {
+  display: flex;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+}
+.json-viewer-tabs button {
+  padding: 6px 11px;
+  border-radius: 4px;
+  color: var(--secondary);
+  font-size: 11px;
+}
+.json-viewer-tabs button[aria-selected="true"] {
+  background: var(--raised);
+  color: var(--accent);
+}
+.json-viewer-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.json-viewer-actions .text-button {
+  font-size: 10px;
+}
+.json-viewer-search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 12px 20px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+}
+.json-viewer-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+.json-viewer-search > span {
+  font-size: 10px;
+  white-space: nowrap;
+}
+.json-viewer-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+.json-tree {
+  padding: 14px 10px 24px;
+  font: 12px/1.65 var(--mono);
+}
+.json-tree-line {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-height: 28px;
+  padding-right: 12px;
+  width: max-content;
+  min-width: 100%;
+}
+.json-tree-line:hover {
+  background: var(--hover);
+}
+.json-tree-toggle,
+.json-tree-spacer {
+  display: inline-flex;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 20px;
+  align-self: center;
+  padding: 0;
+  color: var(--secondary);
+}
+.json-tree-spacer {
+  pointer-events: none;
+}
+.json-key {
+  color: var(--blue);
+}
+.json-index,
+.json-punctuation {
+  color: var(--muted);
+}
+.json-string {
+  color: var(--green);
+}
+.json-number {
+  color: var(--accent);
+}
+.json-boolean {
+  color: #b6a2df;
+}
+.json-null {
+  color: var(--muted);
+  font-style: italic;
+}
+.json-branch-value {
+  color: var(--secondary);
+  display: inline-flex;
+  gap: 7px;
+}
+.json-branch-value > span {
+  font-size: 10px;
+  color: var(--muted);
+}
+.json-type {
+  color: var(--muted);
+  font-size: 9px;
+  opacity: 0.65;
+  margin-left: 5px;
+}
+.json-value {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 680px;
+}
+.json-code {
+  margin: 0;
+  padding: 20px 24px;
+  font: 12px/1.75 var(--mono);
+  tab-size: 2;
+  white-space: pre;
+}
+.json-viewer mark {
+  padding: 0;
+  background: var(--selection);
+  color: var(--text);
+  border-radius: 2px;
+}
+.json-viewer-empty {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  min-height: 240px;
+  gap: 12px;
+  padding: 24px;
+  color: var(--secondary);
+  font-size: 13px;
+  text-align: center;
+}
+.json-viewer-empty h3,
+.json-viewer-empty p {
+  margin: 0;
+}
+.json-viewer-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 20px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+}
+.json-viewer-error {
+  color: var(--red);
+  padding: 0 20px;
+  font-size: 12px;
+}

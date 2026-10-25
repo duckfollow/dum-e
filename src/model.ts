@@ -29,6 +29,7 @@ export interface QueryResult {
   elapsedMs: number;
   truncated: boolean;
   affectedRows?: number;
+  jsonRaw?: Record<number, Record<number, string>>;
 }
 export interface ExecutionResult {
   results: QueryResult[];

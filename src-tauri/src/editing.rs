@@ -3,7 +3,7 @@ use crate::{
     db::{self, Profile, Table},
     metadata::{self, TableDetails},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{Connection, Row};
 use std::{
@@ -11,10 +11,22 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
 };
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EditOperation {
+    #[default]
+    Update,
+    Insert,
+    Delete,
+}
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RowEdit {
+    #[serde(default)]
+    pub operation: EditOperation,
+    #[serde(default)]
     pub original: Vec<Value>,
+    #[serde(default)]
     pub changes: BTreeMap<String, Value>,
 }
 fn err(e: sqlx::Error) -> String {
@@ -67,25 +79,33 @@ fn validate(details: &TableDetails, edits: &[RowEdit]) -> Result<Vec<usize>, Str
     }
     let mut seen = HashSet::new();
     for edit in edits {
-        if edit.original.len() != details.columns.len()
-            || edit.original.iter().any(|v| !scalar(v))
-            || details
-                .columns
-                .iter()
-                .any(|c| matches!(c.data_type.as_str(), "json" | "jsonb"))
-        {
-            return Err(
-                "Reload this table. Rows containing JSON or binary previews are read-only.".into(),
-            );
+        if edit.operation != EditOperation::Insert {
+            if edit.original.len() != details.columns.len()
+                || edit.original.iter().any(|v| !scalar(v))
+                || details
+                    .columns
+                    .iter()
+                    .any(|c| matches!(c.data_type.as_str(), "json" | "jsonb"))
+            {
+                return Err(
+                    "Reload this table. Rows containing JSON or binary previews are read-only."
+                        .into(),
+                );
+            }
+            let key: Vec<_> = keys.iter().map(|i| &edit.original[*i]).collect();
+            if key.iter().any(|v| v.is_null())
+                || !seen.insert(serde_json::to_string(&key).map_err(|e| e.to_string())?)
+            {
+                return Err("Rows require distinct, non-NULL primary keys.".into());
+            }
+        } else if !edit.original.is_empty() {
+            return Err("New rows must not include original values.".into());
         }
-        let key: Vec<_> = keys.iter().map(|i| &edit.original[*i]).collect();
-        if key.iter().any(|v| v.is_null())
-            || !seen.insert(serde_json::to_string(&key).map_err(|e| e.to_string())?)
-        {
-            return Err("Rows require distinct, non-NULL primary keys.".into());
-        }
-        if edit.changes.is_empty() {
+        if edit.operation == EditOperation::Update && edit.changes.is_empty() {
             return Err("No changes supplied for a row.".into());
+        }
+        if edit.operation == EditOperation::Delete && !edit.changes.is_empty() {
+            return Err("Deleted rows cannot include changes.".into());
         }
         for (name, value) in &edit.changes {
             let c = details
@@ -193,7 +213,10 @@ pub async fn apply(
             .collect::<Vec<_>>()
             .join(" AND ");
         let select = format!("SELECT * FROM {target} WHERE {predicate}");
-        for edit in edits {
+        for edit in edits
+            .iter()
+            .filter(|e| e.operation != EditOperation::Insert)
+        {
             let mut q = sqlx::query(&select);
             for i in &keys {
                 q = bind_sqlite(q, &edit.original[*i])?;
@@ -207,6 +230,17 @@ pub async fn apply(
                 .collect::<Result<Vec<_>, _>>()?;
             if current != edit.original {
                 return Err(CONFLICT.into());
+            }
+            if edit.operation == EditOperation::Delete {
+                let sql = format!("DELETE FROM {target} WHERE {predicate}");
+                let mut q = sqlx::query(&sql);
+                for i in &keys {
+                    q = bind_sqlite(q, &edit.original[*i])?;
+                }
+                if q.execute(&mut *tx).await.map_err(err)?.rows_affected() != 1 {
+                    return Err(CONFLICT.into());
+                }
+                continue;
             }
             let set = edit
                 .changes
@@ -224,6 +258,30 @@ pub async fn apply(
             }
             if q.execute(&mut *tx).await.map_err(err)?.rows_affected() != 1 {
                 return Err(CONFLICT.into());
+            }
+        }
+        for edit in edits
+            .iter()
+            .filter(|e| e.operation == EditOperation::Insert)
+        {
+            let names = edit
+                .changes
+                .keys()
+                .map(|n| db::quoted(n))
+                .collect::<Vec<_>>()
+                .join(",");
+            let values = vec!["?"; edit.changes.len()].join(",");
+            let sql = if edit.changes.is_empty() {
+                format!("INSERT INTO {target} DEFAULT VALUES")
+            } else {
+                format!("INSERT INTO {target} ({names}) VALUES ({values})")
+            };
+            let mut q = sqlx::query(&sql);
+            for value in edit.changes.values() {
+                q = bind_sqlite(q, value)?;
+            }
+            if q.execute(&mut *tx).await.map_err(err)?.rows_affected() != 1 {
+                return Err("New row was not inserted. Nothing was saved.".into());
             }
         }
         tx.commit().await.map_err(err)?;
@@ -250,7 +308,10 @@ pub async fn apply(
             .collect::<Vec<_>>()
             .join(" AND ");
         let select = format!("SELECT t.* FROM {target} t, jsonb_populate_record(NULL::{target}, $1::jsonb) o WHERE {predicate} FOR UPDATE OF t");
-        for edit in edits {
+        for edit in edits
+            .iter()
+            .filter(|e| e.operation != EditOperation::Insert)
+        {
             let rows = sqlx::query(&select)
                 .bind(json_row(&details, &edit.original))
                 .fetch_all(&mut *tx)
@@ -264,6 +325,20 @@ pub async fn apply(
                 .collect::<Result<Vec<_>, _>>()?;
             if current != edit.original {
                 return Err(CONFLICT.into());
+            }
+            if edit.operation == EditOperation::Delete {
+                let sql=format!("DELETE FROM {target} t USING jsonb_populate_record(NULL::{target}, $1::jsonb) o WHERE {predicate}");
+                if sqlx::query(&sql)
+                    .bind(json_row(&details, &edit.original))
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(err)?
+                    .rows_affected()
+                    != 1
+                {
+                    return Err(CONFLICT.into());
+                }
+                continue;
             }
             let set = edit
                 .changes
@@ -288,6 +363,47 @@ pub async fn apply(
                 return Err(CONFLICT.into());
             }
         }
+        for edit in edits
+            .iter()
+            .filter(|e| e.operation == EditOperation::Insert)
+        {
+            if edit.changes.is_empty() {
+                if sqlx::query(&format!("INSERT INTO {target} DEFAULT VALUES"))
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(err)?
+                    .rows_affected()
+                    != 1
+                {
+                    return Err("New row was not inserted. Nothing was saved.".into());
+                }
+            } else {
+                let names = edit
+                    .changes
+                    .keys()
+                    .map(|n| db::quoted(n))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let selected = edit
+                    .changes
+                    .keys()
+                    .map(|n| format!("v.{}", db::quoted(n)))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let sql=format!("INSERT INTO {target} ({names}) SELECT {selected} FROM jsonb_populate_record(NULL::{target}, $1::jsonb) v");
+                let values = Value::Object(edit.changes.clone().into_iter().collect());
+                if sqlx::query(&sql)
+                    .bind(values)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(err)?
+                    .rows_affected()
+                    != 1
+                {
+                    return Err("New row was not inserted. Nothing was saved.".into());
+                }
+            }
+        }
         tx.commit().await.map_err(err)?;
     }
     Ok(edits.len() as u64)
@@ -295,7 +411,7 @@ pub async fn apply(
 fn edits_as_value(edits: &[RowEdit]) -> Vec<Value> {
     edits
         .iter()
-        .map(|e| serde_json::json!({"original":e.original,"changes":e.changes}))
+        .map(|e| serde_json::json!({"operation":e.operation,"original":e.original,"changes":e.changes}))
         .collect()
 }
 
@@ -336,6 +452,7 @@ mod tests {
     }
     fn edit(row: &[Value], changes: Value) -> RowEdit {
         RowEdit {
+            operation: EditOperation::Update,
             original: row.to_vec(),
             changes: serde_json::from_value(changes).unwrap(),
         }
@@ -485,6 +602,109 @@ mod tests {
         .await
         .is_err());
     }
+    async fn exercise_crud(p: &Profile, password: &str, schema: &str) {
+        let table = Table {
+            schema: schema.into(),
+            name: "crud_items".into(),
+            kind: "table".into(),
+        };
+        let target = format!("{}.{}", db::quoted(schema), db::quoted(&table.name));
+        let id = if p.driver == "sqlite" {
+            "INTEGER PRIMARY KEY"
+        } else {
+            "INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY"
+        };
+        sql(p,password,&format!("CREATE TABLE {target}(id {id},label TEXT NOT NULL DEFAULT 'new' CHECK(label <> 'bad'), active BOOLEAN DEFAULT true, computed INTEGER GENERATED ALWAYS AS (length(label)) STORED)")).await;
+        let insert = |changes: Value| RowEdit {
+            operation: EditOperation::Insert,
+            original: vec![],
+            changes: serde_json::from_value(changes).unwrap(),
+        };
+        let delete = |original: &Vec<Value>| RowEdit {
+            operation: EditOperation::Delete,
+            original: original.clone(),
+            changes: BTreeMap::new(),
+        };
+        assert_eq!(
+            apply(
+                p,
+                password,
+                &table,
+                &[
+                    insert(json!({})),
+                    insert(json!({"label":"quoted ' ; --", "active":null}))
+                ]
+            )
+            .await
+            .unwrap(),
+            2
+        );
+        let before = rows(p, password, &table).await;
+        assert_eq!(before.len(), 2);
+        assert_eq!(before[0][1], json!("new"));
+        assert_eq!(before[1][2], Value::Null);
+        // All three operations commit together, respecting generated/default values.
+        assert_eq!(
+            apply(
+                p,
+                password,
+                &table,
+                &[
+                    edit(&before[0], json!({"label":"updated"})),
+                    delete(&before[1]),
+                    insert(json!({"label":"created"}))
+                ]
+            )
+            .await
+            .unwrap(),
+            3
+        );
+        let after = rows(p, password, &table).await;
+        assert_eq!(after.len(), 2);
+        assert_eq!(after[0][1], json!("updated"));
+        assert_eq!(after[1][1], json!("created"));
+        // A failed insert rolls back a preceding delete and update.
+        assert!(apply(
+            p,
+            password,
+            &table,
+            &[
+                edit(&after[0], json!({"label":"rollback"})),
+                delete(&after[1]),
+                insert(json!({"label":"bad"}))
+            ]
+        )
+        .await
+        .is_err());
+        assert_eq!(rows(p, password, &table).await, after);
+        let mut stale = after[1].clone();
+        stale[1] = json!("stale");
+        assert!(apply(
+            p,
+            password,
+            &table,
+            &[edit(&after[0], json!({"label":"rollback"})), delete(&stale)]
+        )
+        .await
+        .unwrap_err()
+        .contains("changed or was deleted"));
+        assert_eq!(rows(p, password, &table).await, after);
+        assert!(
+            apply(p, password, &table, &[insert(json!({"computed":"4"}))])
+                .await
+                .is_err()
+        );
+        assert!(apply(p, password, &table, &[insert(json!({"label":null}))])
+            .await
+            .is_err());
+        assert_eq!(
+            apply(p, password, &table, &[delete(&after[0]), delete(&after[1])])
+                .await
+                .unwrap(),
+            2
+        );
+        assert!(rows(p, password, &table).await.is_empty());
+    }
     #[tokio::test]
     async fn sqlite_cell_edits_atomic_composite_conflict_and_constraints() {
         let file = Fixture(
@@ -504,6 +724,7 @@ mod tests {
             remember_password: false,
         };
         exercise(&p, "", "main").await;
+        exercise_crud(&p, "", "main").await;
         sql(&p,"","CREATE TABLE parent(id INTEGER PRIMARY KEY); CREATE TABLE child(id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent(id)); INSERT INTO parent VALUES(1); INSERT INTO child VALUES(1,1);").await;
         let table = Table {
             schema: "main".into(),
@@ -547,6 +768,7 @@ mod tests {
         )
         .await;
         exercise(&p, "dum-e-local-test-only", &schema).await;
+        exercise_crud(&p, "dum-e-local-test-only", &schema).await;
         sql(&p,"dum-e-local-test-only",&format!("CREATE TABLE {}.json_items(id INTEGER PRIMARY KEY, name TEXT, payload JSONB); INSERT INTO {}.json_items VALUES (1,'before','null');",db::quoted(&schema),db::quoted(&schema))).await;
         let json_table = Table {
             schema: schema.clone(),

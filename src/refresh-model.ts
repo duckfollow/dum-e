@@ -19,7 +19,9 @@ export function reconciledResult(
     previous.rows.length === rows.length &&
     rows.every((row, i) => row === previous.rows[i]) &&
     previous.truncated === result.truncated &&
-    previous.affectedRows === result.affectedRows;
+    previous.affectedRows === result.affectedRows &&
+    JSON.stringify(previous.jsonRaw ?? {}) ===
+      JSON.stringify(result.jsonRaw ?? {});
   if (unchanged && (keepTiming || previous.elapsedMs === result.elapsedMs))
     return previous;
   return {

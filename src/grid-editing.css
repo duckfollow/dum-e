@@ -1,0 +1,129 @@
+.editable-grid {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.grid-edit-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  min-height: 44px;
+}
+.grid-edit-toolbar > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.grid-edit-summary {
+  color: var(--muted);
+  font-size: 10px;
+}
+.grid-edit-error {
+  color: var(--red);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.grid-edit-hint {
+  color: var(--secondary);
+  padding: 8px 14px;
+  font-size: 11px;
+}
+.grid-selection {
+  position: relative;
+  width: 38px;
+  min-width: 38px;
+  text-align: center;
+}
+.data-grid .grid-selection input {
+  width: 13px;
+  height: 13px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.grid-cell-changed {
+  background: var(--accent-dim);
+  box-shadow: inset 0 -2px var(--accent);
+}
+.grid-row-new > td {
+  background: color-mix(in srgb, var(--green) 9%, transparent);
+}
+.grid-row-deleted > td {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 7%, transparent);
+  text-decoration: line-through;
+}
+.grid-cell-editor {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 190px;
+}
+.data-grid td.grid-cell-editing {
+  padding: 3px 6px;
+  overflow: visible;
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.grid-cell-editor input,
+.grid-cell-editor select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font: 11px var(--mono);
+  padding: 6px;
+  min-width: 0;
+}
+.grid-cell-editor input {
+  flex: 1;
+  width: 120px;
+}
+.grid-cell-editor select:last-child {
+  width: 72px;
+  flex-shrink: 0;
+}
+.grid-placeholder {
+  color: var(--muted);
+  font-style: italic;
+}
+.grid-undo {
+  position: absolute;
+  inset: 0;
+  background: var(--panel);
+  color: var(--red);
+}
+.editable-grid td:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+@media (max-width: 1100px) {
+  .grid-edit-toolbar {
+    flex-wrap: wrap;
+  }
+  .grid-edit-summary {
+    max-width: 180px;
+  }
+}
+.grid-delete-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 6%, var(--panel));
+  font-size: 12px;
+}
+.grid-delete-confirm > span {
+  margin-right: auto;
+}

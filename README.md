@@ -18,11 +18,11 @@
 - Selected-SQL execution with ⌘ Enter, statement result switching and affected row counts.
 - Current-page filtering/sorting, table paging, and row inspector.
 - CSV / JSON export through a native save dialog.
-- Double-click cell editing for primary-key tables, with staged changes, Review, Apply/Discard, atomic transactions and stale-row conflict checks; see [cell editing](docs/cell-editing.md).
+- Inline data editing for primary-key tables: double-click cells, Add row, select/Delete with Undo, then Save/Discard; atomic transactions and stale-row checks. See [cell editing](docs/cell-editing.md).
 - Light, Dark, and System appearance.
 - A real SQLite sample database via **Explore a sample**.
 
-SQL runs directly with the connected database user or SQLite file permissions; no Full SQL toggle is required. Add/Delete row, MongoDB, SSH tunnels, and backup/restore are not implemented. Table SQL definitions are read-only previews. MySQL is intentionally out of scope. SQL tabs/results live in memory and are discarded when the app exits.
+SQL runs directly with the connected database user or SQLite file permissions; no Full SQL toggle is required. MongoDB, SSH tunnels, and backup/restore are not implemented. Table SQL definitions are read-only previews. MySQL is intentionally out of scope. SQL tabs/results live in memory and are discarded when the app exits.
 
 ## Run locally
 

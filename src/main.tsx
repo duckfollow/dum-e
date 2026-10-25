@@ -1,6 +1,9 @@
+import { JsonCell } from "./JsonCell";
+import { JsonViewer } from "./JsonViewer";
+import type { JsonDocument } from "./json-viewer-model";
 import { reconciledResult, refreshedTab } from "./refresh-model";
 import { AutoRun } from "./AutoRun";
-import { CellEditing } from "./CellEditing";
+import { EditableGrid } from "./EditableGrid";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -118,11 +121,13 @@ function DriverMark({
 const emptySql =
   "-- A little help with your data.\n-- Run your query with ⌘ Enter.\n\nSELECT 1 AS hello;";
 function App() {
-  const [editing, setEditing] = useState<{
-    tab: QueryTab;
-    cell?: { row: number; column: number };
-  } | null>(null);
-
+  const [jsonViewer, setJsonViewer] = useState<JsonDocument | null>(null);
+  const [editing, setEditing] = useState(false);
+  const editingRef = useRef(false);
+  const updateEditing = React.useCallback((value: boolean) => {
+    editingRef.current = value;
+    setEditing(value);
+  }, []);
   const [profiles, setProfiles] = useState<Profile[]>([]),
     [connections, setConnections] = useState<Record<string, Connected>>({}),
     [selectedId, setSelectedId] = useState("");
@@ -182,7 +187,13 @@ function App() {
   }, [toast]);
   const patch = (id: string, value: Partial<QueryTab>) =>
     setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, ...value } : t)));
+  function guardEdits() {
+    if (!editingRef.current) return false;
+    setToast("Save or discard table changes first.");
+    return true;
+  }
   function newQuery(id = profile?.id) {
+    if (guardEdits()) return;
     if (!id) return;
     const tab: QueryTab = {
       id: crypto.randomUUID(),
@@ -209,6 +220,10 @@ function App() {
     selectionOnly = false,
     automatic = false,
   ) {
+    if (editingRef.current) {
+      if (!automatic) guardEdits();
+      return null;
+    }
     if (busyRef.current) return null;
     if (!connections[tab.profileId]) {
       setMessage("Reconnect to this database before running the query.");
@@ -300,6 +315,7 @@ function App() {
     }
   }
   function openOverview(scope = "") {
+    if (guardEdits()) return;
     if (!profile) return;
     const existing = tabsRef.current.find(
       (t) => t.profileId === profile.id && t.overview,
@@ -322,6 +338,7 @@ function App() {
     setActiveId(tab.id);
   }
   async function browse(table: Table, conn = connection, view?: TableView) {
+    if (guardEdits()) return;
     if (!conn) return;
     const existing = tabsRef.current.find(
       (t) =>
@@ -376,6 +393,7 @@ function App() {
     }
   }
   async function selectProfile(p: Profile) {
+    if (guardEdits()) return;
     if (connections[p.id]) {
       setSelectedId(p.id);
       const tab = tabsRef.current.find((t) => t.profileId === p.id);
@@ -427,6 +445,7 @@ function App() {
     }
   }
   async function disconnect() {
+    if (guardEdits()) return;
     if (!profile || busy) return;
     try {
       await api("disconnect_database", { id: profile.id });
@@ -441,6 +460,7 @@ function App() {
     }
   }
   function closeTab(tab: QueryTab) {
+    if (tab.id === activeId && guardEdits()) return;
     if (busy === tab.id) return;
     const remaining = tabs.filter((t) => t.id !== tab.id);
     setTabs(remaining);
@@ -496,7 +516,7 @@ function App() {
               key={p.id}
               className={`connection-item ${profile?.id === p.id ? "selected" : ""}`}
               onClick={() => void selectProfile(p)}
-              disabled={connecting}
+              disabled={connecting || editing}
             >
               <DriverMark driver={p.driver} small />
               <span>
@@ -556,10 +576,11 @@ function App() {
               tables={visibleTables}
               search={tableSearch}
               active={active?.table}
-              busy={!!busy}
+              busy={!!busy || editing}
               onOverview={openOverview}
               onOpen={(table, view) => void browse(table, connection, view)}
               onSql={(sql, title) => {
+                if (guardEdits()) return;
                 const tab: QueryTab = {
                   id: crypto.randomUUID(),
                   profileId: profile.id,
@@ -760,7 +781,7 @@ function App() {
                 </button>
                 <button
                   className="secondary"
-                  disabled={connecting}
+                  disabled={connecting || editing}
                   onClick={() => void sample()}
                 >
                   {connecting ? (
@@ -816,6 +837,7 @@ function App() {
                     role="tab"
                     aria-selected={t.id === activeId}
                     onClick={() => {
+                      if (t.id !== activeId && guardEdits()) return;
                       setActiveId(t.id);
                       setSelectedId(t.profileId);
                     }}
@@ -867,7 +889,9 @@ function App() {
                     connected={!!profile}
                     visibleTables={connection?.tables || []}
                     view={active.tableView || "data"}
-                    onView={(tableView) => patch(active.id, { tableView })}
+                    onView={(tableView) => {
+                      if (!guardEdits()) patch(active.id, { tableView });
+                    }}
                     onOpen={(table) => void browse(table)}
                   />
                 )}
@@ -901,6 +925,7 @@ function App() {
                           available={!!profile}
                           suspended={
                             !!editing ||
+                            !!jsonViewer ||
                             !!modal ||
                             connecting ||
                             (!!active.tableView && active.tableView !== "data")
@@ -950,7 +975,7 @@ function App() {
                     </div>
                     <SqlEditor
                       key={active.id}
-                      readOnly={busy === active.id}
+                      readOnly={busy === active.id || editing}
                       value={active.sql}
                       onChange={(sql) => {
                         setSelectedRow(null);
@@ -1040,16 +1065,6 @@ function App() {
                       )}
                     </div>
                   )}
-                  {editing && (
-                    <CellEditing
-                      tab={editing.tab}
-                      initialCell={editing.cell}
-                      onClose={() => setEditing(null)}
-                      onApplied={async () => {
-                        await execute(editing.tab);
-                      }}
-                    />
-                  )}
                   <div className="result-toolbar">
                     <div className="result-heading">
                       <Table2 size={15} />
@@ -1068,18 +1083,6 @@ function App() {
                       )}
                     </div>
                     <div className="result-actions">
-                      {active.table &&
-                        result &&
-                        active.sql === tableSql(active.table, active.page) && (
-                          <button
-                            className="secondary small"
-                            disabled={!!busy || !profile}
-                            onClick={() => setEditing({ tab: active })}
-                          >
-                            Edit data
-                          </button>
-                        )}
-
                       <div className="result-filter">
                         <Search size={13} />
                         <input
@@ -1203,125 +1206,153 @@ function App() {
                       </div>
                     ) : (
                       <>
-                        <div className="data-grid-wrap">
-                          <table className="data-grid">
-                            <thead>
-                              <tr>
-                                <th className="row-number">#</th>
-                                {result.columns.map((c, i) => (
-                                  <th key={i}>
-                                    <button
-                                      title="Sort current result page"
-                                      onClick={() =>
-                                        setSort({
-                                          index: i,
-                                          asc:
-                                            sort?.index === i
-                                              ? !sort.asc
-                                              : true,
-                                        })
-                                      }
-                                    >
-                                      <span>
-                                        <b>{c.name}</b>
-                                        <small>{c.dataType || "value"}</small>
-                                      </span>
-                                      <ArrowUpDown
-                                        size={11}
-                                        className={
-                                          sort?.index === i ? "accent" : ""
+                        {active.table &&
+                        active.sql === tableSql(active.table, active.page) ? (
+                          <EditableGrid
+                            key={active.id}
+                            tab={active}
+                            rows={rows}
+                            sort={sort}
+                            onSort={setSort}
+                            selectedRow={selectedRow}
+                            onRow={(index, inspect) => {
+                              setSelectedRow(index);
+                              if (inspect) setInspector(true);
+                            }}
+                            connected={!!profile}
+                            onOpenJson={setJsonViewer}
+                            busy={!!busy}
+                            onEditing={updateEditing}
+                            onApplied={async () => {
+                              const refreshed = await api<QueryResult>(
+                                "run_query",
+                                {
+                                  id: active.profileId,
+                                  requestId: crypto.randomUUID(),
+                                  sql: active.sql,
+                                },
+                              );
+                              patch(active.id, {
+                                result: refreshed,
+                                error: undefined,
+                              });
+                              setSelectedRow(null);
+                              setToast("Table updated.");
+                            }}
+                          />
+                        ) : (
+                          <div className="data-grid-wrap">
+                            <table className="data-grid">
+                              <thead>
+                                <tr>
+                                  <th className="row-number">#</th>
+                                  {result.columns.map((c, i) => (
+                                    <th key={i}>
+                                      <button
+                                        title="Sort current result page"
+                                        onClick={() =>
+                                          setSort({
+                                            index: i,
+                                            asc:
+                                              sort?.index === i
+                                                ? !sort.asc
+                                                : true,
+                                          })
                                         }
-                                      />
-                                    </button>
-                                  </th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {rows.map(({ values, index }) => (
-                                <tr
-                                  key={index}
-                                  className={
-                                    selectedRow === index ? "selected-row" : ""
-                                  }
-                                  tabIndex={0}
-                                  aria-label={`Row ${active.page * PAGE_SIZE + index + 1}`}
-                                  onKeyDown={(event) => {
-                                    if (
-                                      event.key === "Enter" ||
-                                      event.key === " "
-                                    ) {
-                                      event.preventDefault();
-                                      setSelectedRow(index);
-                                      setInspector(true);
-                                    }
-                                  }}
-                                  onClick={() => {
-                                    setSelectedRow(index);
-                                  }}
-                                  onDoubleClick={() => {
-                                    setSelectedRow(index);
-                                    setInspector(true);
-                                  }}
-                                >
-                                  <td className="row-number">
-                                    {active.page * PAGE_SIZE + index + 1}
-                                  </td>
-                                  {values.map((v, i) => (
-                                    <td
-                                      key={i}
-                                      title={cellText(v)}
-                                      onDoubleClick={(event) => {
-                                        if (
-                                          active.table &&
-                                          active.sql ===
-                                            tableSql(
-                                              active.table,
-                                              active.page,
-                                            ) &&
-                                          !busy &&
-                                          profile
-                                        ) {
-                                          event.stopPropagation();
-                                          setEditing({
-                                            tab: active,
-                                            cell: { row: index, column: i },
-                                          });
-                                        }
-                                      }}
-                                      className={
-                                        v === null
-                                          ? "null-cell"
-                                          : typeof v === "object"
-                                            ? "json-cell"
-                                            : ""
-                                      }
-                                    >
-                                      {v !== null &&
-                                      result.columns[i]?.name === "status" ? (
-                                        <span
-                                          className={`status-chip ${cellText(v).toLowerCase().replaceAll(" ", "-")}`}
-                                        >
-                                          <span />
-                                          {cellText(v)}
+                                      >
+                                        <span>
+                                          <b>{c.name}</b>
+                                          <small>{c.dataType || "value"}</small>
                                         </span>
-                                      ) : (
-                                        cellText(v)
-                                      )}
-                                    </td>
+                                        <ArrowUpDown
+                                          size={11}
+                                          className={
+                                            sort?.index === i ? "accent" : ""
+                                          }
+                                        />
+                                      </button>
+                                    </th>
                                   ))}
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                          {!rows.length && (
-                            <div className="no-rows">
-                              {filter
-                                ? "No rows match this filter."
-                                : "Query finished. No rows returned."}
-                            </div>
-                          )}
-                        </div>
+                              </thead>
+                              <tbody>
+                                {rows.map(({ values, index }) => (
+                                  <tr
+                                    key={index}
+                                    className={
+                                      selectedRow === index
+                                        ? "selected-row"
+                                        : ""
+                                    }
+                                    tabIndex={0}
+                                    aria-label={`Row ${active.page * PAGE_SIZE + index + 1}`}
+                                    onKeyDown={(event) => {
+                                      if (
+                                        event.key === "Enter" ||
+                                        event.key === " "
+                                      ) {
+                                        event.preventDefault();
+                                        setSelectedRow(index);
+                                        setInspector(true);
+                                      }
+                                    }}
+                                    onClick={() => {
+                                      setSelectedRow(index);
+                                    }}
+                                    onDoubleClick={() => {
+                                      setSelectedRow(index);
+                                      setInspector(true);
+                                    }}
+                                  >
+                                    <td className="row-number">
+                                      {active.page * PAGE_SIZE + index + 1}
+                                    </td>
+                                    {values.map((v, i) => (
+                                      <td
+                                        key={i}
+                                        title={cellText(v)}
+                                        className={
+                                          v === null
+                                            ? "null-cell"
+                                            : typeof v === "object"
+                                              ? "json-cell"
+                                              : ""
+                                        }
+                                      >
+                                        {v !== null &&
+                                        result.columns[i]?.name === "status" ? (
+                                          <span
+                                            className={`status-chip ${cellText(v).toLowerCase().replaceAll(" ", "-")}`}
+                                          >
+                                            <span />
+                                            {cellText(v)}
+                                          </span>
+                                        ) : (
+                                          <JsonCell
+                                            value={v}
+                                            dataType={
+                                              result.columns[i]?.dataType || ""
+                                            }
+                                            raw={result.jsonRaw?.[index]?.[i]}
+                                            label={`${result.columns[i]?.name} · Row ${active.page * PAGE_SIZE + index + 1}`}
+                                            onOpen={setJsonViewer}
+                                          />
+                                        )}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            {!rows.length && (
+                              <div className="no-rows">
+                                {filter
+                                  ? "No rows match this filter."
+                                  : "Query finished. No rows returned."}
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {inspector && (
                           <aside className="row-inspector">
                             <header>
@@ -1359,7 +1390,13 @@ function App() {
                                           : ""
                                       }
                                     >
-                                      {cellText(result.rows[selectedRow][i])}
+                                      <JsonCell
+                                        value={result.rows[selectedRow][i]}
+                                        dataType={c.dataType}
+                                        raw={result.jsonRaw?.[selectedRow]?.[i]}
+                                        label={`${c.name} · Row ${active.page * PAGE_SIZE + selectedRow + 1}`}
+                                        onOpen={setJsonViewer}
+                                      />
                                     </pre>
                                   </div>
                                 ))}
@@ -1459,6 +1496,9 @@ function App() {
           </div>
         </footer>
       </main>
+      {jsonViewer && (
+        <JsonViewer value={jsonViewer} onClose={() => setJsonViewer(null)} />
+      )}
       {modal && (
         <ConnectionDialog
           profile={modal}

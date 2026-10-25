@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{Column, ConnectOptions, Connection, Executor, Row, TypeInfo, ValueRef};
 use std::{
+    collections::BTreeMap,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -87,6 +88,9 @@ pub struct QueryResult {
     pub elapsed_ms: u128,
     pub truncated: bool,
     pub affected_rows: Option<u64>,
+    // Raw JSON text preserves large numbers, duplicate keys and JSON null vs SQL NULL.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub json_raw: BTreeMap<usize, BTreeMap<usize, String>>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Table {
@@ -210,6 +214,41 @@ pub(crate) fn pg_cell(row: &sqlx::postgres::PgRow, index: usize) -> Result<Value
     };
     value_limit(value)
 }
+pub(crate) fn pg_json_raw(row: &sqlx::postgres::PgRow) -> Result<BTreeMap<usize, String>, String> {
+    let mut output = BTreeMap::new();
+    for (i, column) in row.columns().iter().enumerate() {
+        let kind = column.type_info().name();
+        if !matches!(kind, "JSON" | "JSONB") {
+            continue;
+        }
+        let raw = row.try_get_raw(i).map_err(|e| e.to_string())?;
+        if raw.is_null() {
+            continue;
+        }
+        let mut bytes = raw.as_bytes().map_err(|e| e.to_string())?;
+        if kind == "JSONB" && raw.format() == sqlx::postgres::PgValueFormat::Binary {
+            if bytes.first() != Some(&1) {
+                return Err("Unsupported JSONB wire version".into());
+            }
+            bytes = &bytes[1..];
+        }
+        if bytes.len() > 65536 {
+            return Err("A JSON cell exceeds the 64 KB preview limit.".into());
+        }
+        output.insert(
+            i,
+            std::str::from_utf8(bytes)
+                .map_err(|e| e.to_string())?
+                .to_owned(),
+        );
+    }
+    Ok(output)
+}
+pub(crate) fn sqlite_json_raw(
+    _row: &sqlx::sqlite::SqliteRow,
+) -> Result<BTreeMap<usize, String>, String> {
+    Ok(BTreeMap::new())
+}
 pub(crate) async fn sqlite(
     profile: &Profile,
     cancel: Arc<AtomicBool>,
@@ -309,6 +348,7 @@ pub async fn query(
     validate_sql(sql, profile.driver == "postgres")?;
     let start = Instant::now();
     let mut rows = Vec::new();
+    let mut json_raw = BTreeMap::new();
     let mut size = 0;
     let mut truncated = false;
     let columns;
@@ -368,6 +408,11 @@ pub async fn query(
                 truncated = true;
                 break;
             }
+            let raw = pg_json_raw(&row)?;
+            size += raw.values().map(String::len).sum::<usize>();
+            if !raw.is_empty() {
+                json_raw.insert(rows.len(), raw);
+            }
             let cells = (0..row.len())
                 .map(|i| pg_cell(&row, i))
                 .collect::<Result<Vec<_>, _>>()?;
@@ -387,6 +432,7 @@ pub async fn query(
         elapsed_ms: start.elapsed().as_millis(),
         truncated,
         affected_rows: None,
+        json_raw,
     })
 }
 pub async fn schemas(profile: &Profile, password: &str) -> Result<Vec<String>, String> {
