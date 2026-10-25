@@ -9,7 +9,7 @@
     "build": "tauri build",
     "build:web": "tsc --noEmit && vite build",
     "check": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/model.test.ts src/table-model.test.ts src/explorer-model.test.ts src/database-relations-model.test.ts",
+    "test": "node --experimental-strip-types --test src/model.test.ts src/table-model.test.ts src/explorer-model.test.ts src/database-relations-model.test.ts src/cell-editing-model.test.ts src/auto-run.test.ts src/refresh-model.test.ts",
     "tauri": "tauri",
     "test:postgres": "node scripts/test-postgres.mjs",
     "test:native": "cargo test --manifest-path src-tauri/Cargo.toml --lib",

@@ -27,7 +27,7 @@ Database-wide declared-FK overview, isolated objects, schema/name filters, cross
 - Cancel PostgreSQL queries via protocol-level cancellation.
 - Column-aware completion and saved SQL files.
 - Server-side table filters/sorts with stable pagination.
-- Row editing only with a stable key; staged changes, parameterized writes, transaction preview, explicit Apply/rollback.
+- Add/Delete row using the staged transaction workflow. Cell editing with primary/composite keys, review, Apply/Discard and stale-row checks is implemented; see [cell editing](cell-editing.md).
 
 ## Later — MongoDB
 

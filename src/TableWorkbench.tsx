@@ -575,11 +575,21 @@ export function RelationGraph({
   const initial = graph || focusGraph(table, relations);
   const viewport = useRef<HTMLDivElement>(null);
   const [nodes, setNodes] = useState<GraphNode[]>(initial.nodes),
-    [zoom, setZoom] = useState(0.85);
+    [zoom, setZoom] = useState(0.85),
+    [hovered, setHovered] = useState<string | null>(null);
   useEffect(() => {
     if (graph) {
       setNodes(graph.nodes);
-      setZoom(0.75);
+      setZoom(
+        Math.max(
+          0.25,
+          Math.min(
+            0.85,
+            ((viewport.current?.clientWidth || 960) - 32) / graph.width,
+          ),
+        ),
+      );
+      setHovered(null);
     }
   }, [graph]);
   const drag = useRef<{
@@ -669,7 +679,7 @@ export function RelationGraph({
                 )
               }
             >
-              Fit
+              Fit width
             </button>
           )}
           <button
@@ -736,6 +746,14 @@ export function RelationGraph({
                 <path
                   key={relation.id}
                   d={path(relation, i)}
+                  className={
+                    graph && hovered
+                      ? tableKey(relation.fromTable) === hovered ||
+                        tableKey(relation.toTable) === hovered
+                        ? "active-edge"
+                        : "muted-edge"
+                      : undefined
+                  }
                   markerEnd={`url(#${marker})`}
                 >
                   <title>
@@ -748,7 +766,23 @@ export function RelationGraph({
             {nodes.map((node) => (
               <div
                 key={node.id}
-                className={`graph-node ${node.role === "selected" ? "selected" : ""}`}
+                className={`graph-node ${node.role === "selected" ? "selected" : ""} ${graph && hovered === node.id ? "highlighted" : ""}`}
+                onMouseEnter={() => {
+                  if (graph) setHovered(node.id);
+                }}
+                onMouseLeave={() => {
+                  if (graph) setHovered(null);
+                }}
+                onFocusCapture={() => {
+                  if (graph) setHovered(node.id);
+                }}
+                onBlurCapture={(e) => {
+                  if (
+                    graph &&
+                    !e.currentTarget.contains(e.relatedTarget as Node)
+                  )
+                    setHovered(null);
+                }}
                 style={{ left: node.x, top: node.y }}
               >
                 <div className="graph-node-top">
@@ -831,8 +865,9 @@ export function RelationGraph({
         </div>
       </div>
       <p className="graph-caption">
-        Drag handles to arrange tables. Open a table using its name. Layout is
-        temporary. Reset restores the initial arrangement.
+        {graph
+          ? "Drag handles to arrange · Hover to follow links · Open a table by its name · Layout is temporary"
+          : "Drag handles to arrange tables. Open a table using its name. Layout is temporary. Reset restores the initial arrangement."}
       </p>
     </div>
   );

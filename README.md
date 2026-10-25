@@ -13,14 +13,16 @@
 - Declared incoming/outgoing foreign keys, compound keys, and a focused draggable relationship graph.
 - Database Relations overview across all visible objects, with schema/search filters and cross-schema FK links.
 - SQL editor with syntax highlighting, table-name completions, multiple tabs, and ⌘ Enter.
+- Auto run read-only queries every 1, 3, 5 or custom seconds; stops on errors, query/tab changes, editing, disconnection or hiding the window; see [auto run](docs/auto-run.md).
 - SQL available immediately, including DDL/DML and multi-statement scripts; access is enforced by PostgreSQL roles or SQLite file permissions.
 - Selected-SQL execution with ⌘ Enter, statement result switching and affected row counts.
 - Current-page filtering/sorting, table paging, and row inspector.
 - CSV / JSON export through a native save dialog.
+- Double-click cell editing for primary-key tables, with staged changes, Review, Apply/Discard, atomic transactions and stale-row conflict checks; see [cell editing](docs/cell-editing.md).
 - Light, Dark, and System appearance.
 - A real SQLite sample database via **Explore a sample**.
 
-SQL runs directly with the connected database user or SQLite file permissions; no Full SQL toggle is required. GUI row editing, MongoDB, SSH tunnels, and backup/restore are not implemented. Table SQL definitions are read-only previews. MySQL is intentionally out of scope. SQL tabs/results live in memory and are discarded when the app exits.
+SQL runs directly with the connected database user or SQLite file permissions; no Full SQL toggle is required. Add/Delete row, MongoDB, SSH tunnels, and backup/restore are not implemented. Table SQL definitions are read-only previews. MySQL is intentionally out of scope. SQL tabs/results live in memory and are discarded when the app exits.
 
 ## Run locally
 

@@ -78,7 +78,7 @@ export function overviewGraph(
   }
   const visible = order.slice(0, Math.max(0, limit)),
     ids = new Set(visible);
-  const cols = Math.max(1, Math.min(5, Math.ceil(Math.sqrt(visible.length))));
+  const cols = Math.max(1, Math.min(5, visible.length));
   const edges = relations
     .filter(
       (r) => ids.has(tableKey(r.fromTable)) && ids.has(tableKey(r.toTable)),

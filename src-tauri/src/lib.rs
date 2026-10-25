@@ -1,4 +1,5 @@
 mod db;
+mod editing;
 mod execution;
 mod metadata;
 mod relations;
@@ -264,6 +265,16 @@ async fn table_details(
     metadata::inspect(&session.profile, &session.password, &table).await
 }
 #[tauri::command]
+async fn apply_cell_edits(
+    state: tauri::State<'_, Workspace>,
+    id: String,
+    table: Table,
+    edits: Vec<editing::RowEdit>,
+) -> Result<u64, String> {
+    let s = session(&state, &id)?;
+    editing::apply(&s.profile, &s.password, &table, &edits).await
+}
+#[tauri::command]
 async fn execute_sql(
     state: tauri::State<'_, Workspace>,
     id: String,
@@ -446,6 +457,7 @@ pub fn run() {
             database_relations,
             run_query,
             execute_sql,
+            apply_cell_edits,
             cancel_query,
             open_sample,
             export_result

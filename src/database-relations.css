@@ -138,3 +138,224 @@
   width: calc(100% - 32px);
   font-size: 12px;
 }
+
+/* Keep the diagram in the workspace; detailed lists have their own views. */
+.database-relations {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 20px 24px;
+  overflow: hidden;
+}
+.database-relations > header {
+  flex: none;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.database-relations h1 {
+  font-size: 20px;
+  margin: 0;
+  letter-spacing: -0.4px;
+}
+.database-relations > header p {
+  margin: 7px 0 0;
+  font-size: 11px;
+}
+.database-relations > header > button {
+  font-size: 11px;
+  white-space: nowrap;
+}
+.overview-stats {
+  flex: none;
+  padding: 8px 0 14px;
+  gap: 10px;
+}
+.overview-stats b {
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
+  font-size: 11px;
+  font-weight: 500;
+}
+.overview-stats span {
+  font-size: 10px;
+  margin-left: 4px;
+}
+.overview-filters {
+  flex: none;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 10px 12px;
+}
+.overview-filters label {
+  font-size: 11px;
+}
+.overview-filters label:nth-child(2) {
+  flex: 1;
+  min-width: 200px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--editor);
+  padding-left: 9px;
+}
+.overview-filters label:nth-child(2) input {
+  border: 0;
+  min-width: 0;
+  width: 100%;
+  background: transparent;
+  padding: 8px;
+}
+.overview-filters label:nth-child(2):focus-within {
+  outline: 1px solid var(--accent);
+}
+.overview-filters label:nth-child(2) input:focus {
+  outline: 0;
+}
+.overview-filters label:nth-child(3) {
+  white-space: nowrap;
+  cursor: pointer;
+}
+.overview-filters input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+.overview-filters select {
+  font-size: 11px;
+  padding: 7px;
+}
+.overview-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  margin: 14px 0 10px;
+  gap: 12px;
+}
+.overview-navigation > div {
+  display: flex;
+  padding: 3px;
+  background: var(--sidebar);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  gap: 3px;
+}
+.overview-navigation button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: 7px 11px;
+  font: inherit;
+  font-size: 11px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.overview-navigation button[aria-selected="true"] {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--text);
+  box-shadow: 0 1px 3px #0001;
+}
+.overview-navigation small {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--hover);
+  font: 10px var(--mono);
+}
+.overview-navigation > span {
+  font-size: 10px;
+  color: var(--muted);
+}
+.overview-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.overview-panel > .relation-graph {
+  flex: 1;
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+}
+.database-relations .graph-toolbar {
+  flex: none;
+  padding: 10px 13px;
+}
+.database-relations .graph-viewport {
+  flex: 1;
+  min-height: 160px;
+  max-height: none;
+}
+.database-relations .graph-caption {
+  flex: none;
+  font-size: 10px;
+}
+.database-relations .graph-edges > path {
+  stroke-linejoin: round;
+  transition: stroke-opacity 0.12s;
+}
+.database-relations .graph-edges > path.active-edge {
+  stroke-opacity: 1;
+  stroke-width: 2.6;
+}
+.database-relations .graph-edges > path.muted-edge {
+  stroke-opacity: 0.12;
+}
+.database-relations .graph-node.highlighted {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-dim);
+}
+.overview-panel .overview-list {
+  margin-top: 0;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px;
+}
+.overview-objects > div {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  justify-content: space-between;
+}
+.overview-help {
+  flex: none;
+  margin-top: 10px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.overview-help summary {
+  cursor: pointer;
+  width: max-content;
+}
+.overview-help[open] {
+  max-height: 100px;
+  overflow: auto;
+}
+.database-relations > .overview-note {
+  margin: 0 0 8px;
+  font-size: 10px;
+}
+@media (max-width: 1150px) {
+  .database-relations {
+    padding: 16px;
+  }
+  .overview-filters {
+    gap: 10px;
+  }
+  .overview-filters label:nth-child(2) {
+    min-width: 160px;
+  }
+  .overview-navigation > span {
+    display: none;
+  }
+  .overview-stats span {
+    font-size: 9px;
+  }
+}

@@ -310,7 +310,7 @@ export function DatabaseExplorer({
                 <span>{tables.filter((t) => t.schema === schema).length}</span>
                 <button
                   className="explorer-more"
-                  disabled={busy}
+                  aria-disabled={busy}
                   aria-label={`Manage schema ${schema}`}
                   onClick={(e) => {
                     const rect = e.currentTarget.getBoundingClientRect();
@@ -348,7 +348,7 @@ export function DatabaseExplorer({
                     </button>
                     <button
                       className="explorer-more"
-                      disabled={busy}
+                      aria-disabled={busy}
                       aria-label={`Manage ${schema}.${table.name}`}
                       onClick={(e) => {
                         const rect = e.currentTarget.getBoundingClientRect();

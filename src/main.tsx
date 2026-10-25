@@ -1,3 +1,6 @@
+import { reconciledResult, refreshedTab } from "./refresh-model";
+import { AutoRun } from "./AutoRun";
+import { CellEditing } from "./CellEditing";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -9,7 +12,6 @@ import {
   FileCode2,
   X,
   Play,
-  Square,
   RefreshCw,
   Download,
   PanelRightClose,
@@ -116,6 +118,11 @@ function DriverMark({
 const emptySql =
   "-- A little help with your data.\n-- Run your query with ⌘ Enter.\n\nSELECT 1 AS hello;";
 function App() {
+  const [editing, setEditing] = useState<{
+    tab: QueryTab;
+    cell?: { row: number; column: number };
+  } | null>(null);
+
   const [profiles, setProfiles] = useState<Profile[]>([]),
     [connections, setConnections] = useState<Record<string, Connected>>({}),
     [selectedId, setSelectedId] = useState("");
@@ -200,24 +207,26 @@ function App() {
     sqlText = tab.sql,
     page = tab.page,
     selectionOnly = false,
+    automatic = false,
   ) {
-    if (busyRef.current) return;
+    if (busyRef.current) return null;
     if (!connections[tab.profileId]) {
       setMessage("Reconnect to this database before running the query.");
-      return;
+      return false;
     }
     busyRef.current = true;
-    setBusy(tab.id);
-    setSelectedRow(null);
+    if (!automatic) {
+      setBusy(tab.id);
+      if (page !== tab.page || sqlText !== tab.sql) setSelectedRow(null);
+    }
     const requestId = crypto.randomUUID();
     queryId.current = requestId;
-    patch(tab.id, {
-      error: undefined,
-      execution: undefined,
-      result: undefined,
-    });
+    if (!automatic)
+      patch(tab.id, {
+        error: undefined,
+      });
     try {
-      if (!tab.table) {
+      if (!tab.table && !automatic) {
         const execution = await api<ExecutionResult>("execute_sql", {
           id: tab.profileId,
           requestId,
@@ -225,7 +234,11 @@ function App() {
         });
         patch(tab.id, {
           execution,
-          result: execution.results.at(-1),
+          result: execution.results.at(-1)
+            ? reconciledResult(tab.result, execution.results.at(-1)!)
+            : execution.error
+              ? tab.result
+              : undefined,
           page,
           sql: selectionOnly ? tab.sql : sqlText,
           error: undefined,
@@ -236,17 +249,40 @@ function App() {
           requestId,
           sql: sqlText,
         });
-        patch(tab.id, {
-          result,
-          page,
-          sql: selectionOnly ? tab.sql : sqlText,
-          error: undefined,
-        });
+        if (automatic) {
+          setTabs((ts) => {
+            let changed = false;
+            const next = ts.map((t) => {
+              if (t.id !== tab.id) return t;
+              const refreshed = refreshedTab(t, result, sqlText, page);
+              if (refreshed !== t) changed = true;
+              return refreshed;
+            });
+            return changed ? next : ts;
+          });
+        } else {
+          patch(tab.id, {
+            result: reconciledResult(tab.result, result),
+            page,
+            sql: selectionOnly ? tab.sql : sqlText,
+            error: undefined,
+          });
+        }
       }
+      return true;
     } catch (e) {
-      patch(tab.id, { error: String(e), result: undefined });
+      if (automatic) {
+        setTabs((ts) =>
+          ts.map((t) =>
+            t.id === tab.id && t.sql === sqlText && t.page === page
+              ? { ...t, error: `Auto run stopped (read-only): ${String(e)}` }
+              : t,
+          ),
+        );
+      } else patch(tab.id, { error: String(e) });
+      return false;
     } finally {
-      if (!tab.table) {
+      if (!tab.table && !automatic) {
         try {
           const catalog = await readCatalog(tab.profileId);
           setConnections((cs) =>
@@ -260,7 +296,7 @@ function App() {
       }
       queryId.current = "";
       busyRef.current = false;
-      setBusy("");
+      if (!automatic) setBusy("");
     }
   }
   function openOverview(scope = "") {
@@ -668,7 +704,7 @@ function App() {
                 className="icon-button"
                 title="Disconnect selected database"
                 aria-label="Disconnect database"
-                disabled={!!busy}
+                aria-disabled={!!busy}
                 onClick={() => void disconnect()}
               >
                 <Unplug size={16} />
@@ -784,16 +820,19 @@ function App() {
                       setSelectedId(t.profileId);
                     }}
                   >
-                    {t.table ? <Table2 size={14} /> : <FileCode2 size={14} />}
-                    <span>{t.title}</span>
-                    {busy === t.id && (
-                      <LoaderCircle size={12} className="spin" />
+                    {t.overview ? (
+                      <GitFork size={14} />
+                    ) : t.table ? (
+                      <Table2 size={14} />
+                    ) : (
+                      <FileCode2 size={14} />
                     )}
+                    <span>{t.title}</span>
                   </button>
                   <button
                     className="tab-close"
                     aria-label={`Close ${t.title}`}
-                    disabled={busy === t.id}
+                    aria-disabled={busy === t.id}
                     onClick={() => closeTab(t)}
                   >
                     <X size={12} />
@@ -855,27 +894,58 @@ function App() {
                       </div>
                       <div>
                         <span className="shortcut">⌘ Enter to run</span>
-                        {busy ? (
-                          <button
-                            className="secondary small"
-                            onClick={() =>
+                        <AutoRun
+                          key={active.id}
+                          identity={`${active.id}:${active.page}`}
+                          sql={active.sql}
+                          available={!!profile}
+                          suspended={
+                            !!editing ||
+                            !!modal ||
+                            connecting ||
+                            (!!active.tableView && active.tableView !== "data")
+                          }
+                          run={() =>
+                            execute(
+                              active,
+                              active.sql,
+                              active.page,
+                              false,
+                              true,
+                            )
+                          }
+                        />
+                        <button
+                          className="primary small run-query-button"
+                          aria-busy={!!busy}
+                          disabled={!profile && !busy}
+                          aria-label={
+                            busy
+                              ? "Cancel running query"
+                              : active.table
+                                ? "Run query"
+                                : "Run script"
+                          }
+                          title={
+                            busy
+                              ? "Running… click to cancel"
+                              : "Run query (⌘ Enter)"
+                          }
+                          onClick={() => {
+                            if (busy)
                               void api("cancel_query", {
                                 requestId: queryId.current,
-                              }).catch((e) => setMessage(String(e)))
-                            }
-                          >
-                            <Square size={11} /> Cancel
-                          </button>
-                        ) : (
-                          <button
-                            className="primary small"
-                            disabled={!profile}
-                            onClick={() => void execute(active)}
-                          >
-                            <Play size={12} fill="currentColor" />{" "}
-                            {!active.table ? "Run script" : "Run query"}
-                          </button>
-                        )}
+                              }).catch((e) => setMessage(String(e)));
+                            else void execute(active);
+                          }}
+                        >
+                          <Play
+                            size={12}
+                            fill="currentColor"
+                            aria-hidden="true"
+                          />
+                          {!active.table ? "Run script" : "Run query"}
+                        </button>
                       </div>
                     </div>
                     <SqlEditor
@@ -970,6 +1040,16 @@ function App() {
                       )}
                     </div>
                   )}
+                  {editing && (
+                    <CellEditing
+                      tab={editing.tab}
+                      initialCell={editing.cell}
+                      onClose={() => setEditing(null)}
+                      onApplied={async () => {
+                        await execute(editing.tab);
+                      }}
+                    />
+                  )}
                   <div className="result-toolbar">
                     <div className="result-heading">
                       <Table2 size={15} />
@@ -988,6 +1068,18 @@ function App() {
                       )}
                     </div>
                     <div className="result-actions">
+                      {active.table &&
+                        result &&
+                        active.sql === tableSql(active.table, active.page) && (
+                          <button
+                            className="secondary small"
+                            disabled={!!busy || !profile}
+                            onClick={() => setEditing({ tab: active })}
+                          >
+                            Edit data
+                          </button>
+                        )}
+
                       <div className="result-filter">
                         <Search size={13} />
                         <input
@@ -1008,11 +1100,16 @@ function App() {
                       </div>
                       <span className="toolbar-divider" />
                       <button
-                        className="icon-button"
-                        title="Refresh query"
+                        className="icon-button query-refresh-button"
+                        title={
+                          busy ? "Query is already running" : "Refresh query"
+                        }
                         aria-label="Refresh query"
-                        disabled={!!busy || !profile}
-                        onClick={() => void execute(active)}
+                        aria-busy={!!busy}
+                        disabled={!profile}
+                        onClick={() => {
+                          if (!busyRef.current) void execute(active);
+                        }}
                       >
                         <RefreshCw size={14} />
                       </button>
@@ -1047,19 +1144,33 @@ function App() {
                       </button>
                     </div>
                   </div>
+                  {active.error && result && (
+                    <div className="auto-run-error-banner" role="alert">
+                      {active.error}
+                      <span>
+                        {" "}
+                        Previous result is still shown.
+                        {!active.table &&
+                        !active.error.startsWith("Auto run stopped")
+                          ? " Earlier statements may have committed; inspect before retrying."
+                          : ""}
+                      </span>
+                    </div>
+                  )}
                   <div className="result-body">
-                    {active.error ? (
+                    {active.error && !result ? (
                       <div className="query-error" role="alert">
                         <AlertCircle size={24} />
                         <h3>Let’s take another look.</h3>
                         <pre>{active.error}</pre>
                         <p>
-                          {active.table
+                          {active.table ||
+                          active.error.startsWith("Auto run stopped")
                             ? "Update your query above and try again."
                             : "Some changes may already be committed. Check the database before running this SQL again."}
                         </p>
                       </div>
-                    ) : busy === active.id ? (
+                    ) : busy === active.id && !result ? (
                       <div className="result-empty">
                         <LoaderCircle className="spin" size={26} />
                         <h3>Asking your database…</h3>
@@ -1160,6 +1271,24 @@ function App() {
                                     <td
                                       key={i}
                                       title={cellText(v)}
+                                      onDoubleClick={(event) => {
+                                        if (
+                                          active.table &&
+                                          active.sql ===
+                                            tableSql(
+                                              active.table,
+                                              active.page,
+                                            ) &&
+                                          !busy &&
+                                          profile
+                                        ) {
+                                          event.stopPropagation();
+                                          setEditing({
+                                            tab: active,
+                                            cell: { row: index, column: i },
+                                          });
+                                        }
+                                      }}
                                       className={
                                         v === null
                                           ? "null-cell"
@@ -1205,7 +1334,8 @@ function App() {
                                 <X size={14} />
                               </button>
                             </header>
-                            {selectedRow === null ? (
+                            {selectedRow === null ||
+                            !result.rows[selectedRow] ? (
                               <div className="inspector-empty">
                                 <Columns3 size={24} />
                                 <p>Select a row to see its values.</p>
