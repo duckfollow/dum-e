@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Dum-E — Database workspace",
+        "title": "Dum-E \u2014 Database workspace",
         "width": 1400,
         "height": 900,
         "minWidth": 960,
@@ -33,6 +33,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "macOS": { "minimumSystemVersion": "13.5" }
+    "macOS": {
+      "minimumSystemVersion": "13.5",
+      "signingIdentity": "-"
+    }
   }
 }

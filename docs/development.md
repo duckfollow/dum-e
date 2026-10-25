@@ -29,3 +29,7 @@ Native fixtures also cover full scripts: CREATE/ALTER/DROP, INSERT/UPDATE/DELETE
 ## Table details UI checks
 
 Use **Explore a sample**, then open `mission_assignments`. Inspect Structure, Indexes, Relations, and SQL; follow a graph node to another table, zoom/reset and move nodes. Check both themes. The versioned sample includes compound keys, incoming/outgoing/self references, a generated column and a partial index. Metadata refresh must not overwrite another selected table.
+
+## macOS release integrity
+
+Local builds use explicit ad-hoc bundle signing (`signingIdentity: "-"`) so the entire app has a sealed, verifiable signature. `npm run build` verifies the finished bundle with `codesign --verify --deep --strict`. A valid DMG checksum alone does not verify the enclosed app signature. Ad-hoc signing is not Developer ID signing or notarization and does not make downloaded builds trusted by Gatekeeper. For public distribution, override the signing identity with the Developer ID Application certificate, notarize, and test a downloaded build on another Mac.
