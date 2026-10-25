@@ -591,6 +591,16 @@ mod tests {
         assert_eq!(r.rows[0][3], Value::Null);
         assert_eq!(r.rows[0][4], json!({"a":1}));
         assert_eq!(r.rows[0][5], json!("2026-10-24"));
+        let fidelity = query(
+            &p, "dum-e-local-test-only",
+            r#"SELECT 'null'::json, NULL::json, '{"id":9007199254740993,"id":9007199254740994}'::json, '{"exact":1234567890.123456789}'::jsonb"#,
+            Arc::new(AtomicBool::new(false)),
+        ).await.unwrap();
+        let raw = &fidelity.json_raw[&0];
+        assert_eq!(raw[&0], "null");
+        assert!(!raw.contains_key(&1));
+        assert_eq!(raw[&2], r#"{"id":9007199254740993,"id":9007199254740994}"#);
+        assert!(raw[&3].contains("1234567890.123456789"));
         let r = query(
             &p,
             "dum-e-local-test-only",

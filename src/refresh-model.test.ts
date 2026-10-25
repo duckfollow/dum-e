@@ -95,3 +95,11 @@ test("manual refresh preserves rows while updating actual execution timing", () 
     result,
   );
 });
+
+test("refresh updates JSON metadata even when rendered cell values are identical", () => {
+  const previous = { ...result, rows: [[null]], jsonRaw: { 0: { 0: "null" } } };
+  const next = reconciledResult(previous, { ...previous, jsonRaw: {} }, true);
+  assert.notEqual(next, previous);
+  assert.deepEqual(next.jsonRaw, {});
+  assert.equal(next.rows[0], previous.rows[0]);
+});

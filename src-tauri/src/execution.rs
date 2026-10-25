@@ -281,6 +281,16 @@ mod tests {
             remember_password: false,
         };
         let password = "dum-e-local-test-only";
+        let fidelity = execute(&p, password,
+            r#"SELECT 'null'::json, NULL::json, '{"id":9007199254740993,"id":9007199254740994}'::json, '{"exact":1234567890.123456789}'::jsonb"#,
+            flag()).await.unwrap();
+        assert!(fidelity.error.is_none(), "{:?}", fidelity.error);
+        let raw = &fidelity.results[0].json_raw[&0];
+        assert_eq!(raw[&0], "null");
+        assert!(!raw.contains_key(&1));
+        assert_eq!(raw[&2], r#"{"id":9007199254740993,"id":9007199254740994}"#);
+        assert!(raw[&3].contains("1234567890.123456789"));
+
         let setup=execute(&p,password,"CREATE SCHEMA overview_external; CREATE TABLE overview_external.link(child_id bigint REFERENCES catalog_test.child(id));",flag()).await.unwrap();
         assert!(setup.error.is_none(), "{:?}", setup.error);
         let overview = crate::relations::inspect(&p, password).await.unwrap();

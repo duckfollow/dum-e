@@ -27,7 +27,23 @@
   opacity: 1;
 }
 .schema-name.explorer-row {
-  padding-right: 35px;
+  padding: 0;
+}
+.schema-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 35px 9px 8px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.schema-toggle > svg {
+  flex-shrink: 0;
+  pointer-events: none;
 }
 .explorer-menu {
   position: fixed;

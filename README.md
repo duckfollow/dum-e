@@ -17,6 +17,7 @@
 - SQL available immediately, including DDL/DML and multi-statement scripts; access is enforced by PostgreSQL roles or SQLite file permissions.
 - Selected-SQL execution with ⌘ Enter, statement result switching and affected row counts.
 - Current-page filtering/sorting, table paging, and row inspector.
+- Read-only JSON viewer with expandable Tree, Formatted/Raw modes, search and copy; see [JSON viewer](docs/json-viewer.md).
 - CSV / JSON export through a native save dialog.
 - Inline data editing for primary-key tables: double-click cells, Add row, select/Delete with Undo, then Save/Discard; atomic transactions and stale-row checks. See [cell editing](docs/cell-editing.md).
 - Light, Dark, and System appearance.

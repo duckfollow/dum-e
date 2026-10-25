@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
+  ChevronRight,
   Database,
   Table2,
   MoreHorizontal,
@@ -61,6 +62,12 @@ export function DatabaseExplorer({
   const menuRef = useRef<HTMLDivElement>(null),
     dialogRef = useRef<HTMLDivElement>(null),
     triggerRef = useRef<HTMLElement | null>(null);
+  const [collapsedSchemas, setCollapsedSchemas] = useState<Set<string>>(
+    new Set(),
+  );
+  useEffect(() => {
+    if (search) setCollapsedSchemas(new Set());
+  }, [search]);
   const driver = connection.profile.driver;
   const closeMenu = () => {
     setMenu(null);
@@ -304,10 +311,31 @@ export function DatabaseExplorer({
                   show({ schema }, e.clientX, e.clientY, e.currentTarget);
                 }}
               >
-                <ChevronDown size={13} />
-                <Database size={14} />
-                {schema}
-                <span>{tables.filter((t) => t.schema === schema).length}</span>
+                <button
+                  type="button"
+                  className="schema-toggle"
+                  aria-label={`${collapsedSchemas.has(schema) ? "Expand" : "Collapse"} schema ${schema}`}
+                  aria-expanded={!collapsedSchemas.has(schema)}
+                  onClick={() =>
+                    setCollapsedSchemas((previous) => {
+                      const next = new Set(previous);
+                      if (next.has(schema)) next.delete(schema);
+                      else next.add(schema);
+                      return next;
+                    })
+                  }
+                >
+                  {collapsedSchemas.has(schema) ? (
+                    <ChevronRight size={13} />
+                  ) : (
+                    <ChevronDown size={13} />
+                  )}
+                  <Database size={14} />
+                  {schema}
+                  <span>
+                    {tables.filter((t) => t.schema === schema).length}
+                  </span>
+                </button>
                 <button
                   className="explorer-more"
                   aria-disabled={busy}
@@ -320,50 +348,51 @@ export function DatabaseExplorer({
                   <MoreHorizontal size={15} />
                 </button>
               </div>
-              {tables
-                .filter((t) => t.schema === schema)
-                .map((table) => (
-                  <div
-                    key={JSON.stringify([schema, table.name])}
-                    className="explorer-row"
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      show(
-                        { schema, table },
-                        e.clientX,
-                        e.clientY,
-                        e.currentTarget.querySelector("button")!,
-                      );
-                    }}
-                  >
-                    <button
-                      className={`table-item ${active?.name === table.name && active?.schema === schema ? "active" : ""}`}
-                      onClick={() => onOpen(table, "data")}
-                    >
-                      <Table2 size={14} />
-                      <span>{table.name}</span>
-                      {table.kind.toLowerCase().includes("view") && (
-                        <small>view</small>
-                      )}
-                    </button>
-                    <button
-                      className="explorer-more"
-                      aria-disabled={busy}
-                      aria-label={`Manage ${schema}.${table.name}`}
-                      onClick={(e) => {
-                        const rect = e.currentTarget.getBoundingClientRect();
+              {!collapsedSchemas.has(schema) &&
+                tables
+                  .filter((t) => t.schema === schema)
+                  .map((table) => (
+                    <div
+                      key={JSON.stringify([schema, table.name])}
+                      className="explorer-row"
+                      onContextMenu={(e) => {
+                        e.preventDefault();
                         show(
                           { schema, table },
-                          rect.right,
-                          rect.bottom,
-                          e.currentTarget,
+                          e.clientX,
+                          e.clientY,
+                          e.currentTarget.querySelector("button")!,
                         );
                       }}
                     >
-                      <MoreHorizontal size={15} />
-                    </button>
-                  </div>
-                ))}
+                      <button
+                        className={`table-item ${active?.name === table.name && active?.schema === schema ? "active" : ""}`}
+                        onClick={() => onOpen(table, "data")}
+                      >
+                        <Table2 size={14} />
+                        <span>{table.name}</span>
+                        {table.kind.toLowerCase().includes("view") && (
+                          <small>view</small>
+                        )}
+                      </button>
+                      <button
+                        className="explorer-more"
+                        aria-disabled={busy}
+                        aria-label={`Manage ${schema}.${table.name}`}
+                        onClick={(e) => {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          show(
+                            { schema, table },
+                            rect.right,
+                            rect.bottom,
+                            e.currentTarget,
+                          );
+                        }}
+                      >
+                        <MoreHorizontal size={15} />
+                      </button>
+                    </div>
+                  ))}
             </section>
           ))}
         {!tables.length && <p className="sidebar-empty">No matching tables.</p>}

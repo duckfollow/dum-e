@@ -165,9 +165,11 @@
 .json-tree-toggle,
 .json-tree-spacer {
   display: inline-flex;
-  flex: 0 0 16px;
-  width: 16px;
-  height: 20px;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
   align-self: center;
   padding: 0;
   color: var(--secondary);
@@ -256,4 +258,16 @@
   color: var(--red);
   padding: 0 20px;
   font-size: 12px;
+}
+
+.json-tree-toggle {
+  cursor: pointer;
+  border-radius: 4px;
+}
+.json-tree-toggle > svg {
+  pointer-events: none;
+}
+
+.json-expand-toggle {
+  min-width: 82px;
 }

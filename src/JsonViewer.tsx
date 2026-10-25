@@ -79,6 +79,11 @@ export function JsonViewer({
         : { visible: new Set<string>(), matches: new Set<string>() },
     [parsed.root, query],
   );
+  const branches = useMemo(
+    () => (parsed.root ? branchIds(parsed.root) : []),
+    [parsed.root],
+  );
+  const allExpanded = branches.every((id) => expanded.has(id));
   const text = mode === "raw" ? value.raw : parsed.pretty;
   const tokens = useMemo(() => {
     try {
@@ -98,7 +103,7 @@ export function JsonViewer({
   function tree(node: JsonNode, key: string | null, index: number | null) {
     if (query && !search.visible.has(node.id)) return null;
     const branch = node.kind === "object" || node.kind === "array";
-    const open = query ? true : expanded.has(node.id);
+    const open = expanded.has(node.id);
     const name =
       key === null
         ? index === null
@@ -213,23 +218,16 @@ export function JsonViewer({
             ))}
           </div>
           <div className="json-viewer-actions">
-            {mode === "tree" && parsed.root && (
-              <>
-                <button
-                  type="button"
-                  className="text-button"
-                  onClick={() => setExpanded(new Set(branchIds(parsed.root!)))}
-                >
-                  Expand all
-                </button>
-                <button
-                  type="button"
-                  className="text-button"
-                  onClick={() => setExpanded(new Set())}
-                >
-                  Collapse all
-                </button>
-              </>
+            {mode === "tree" && branches.length > 0 && (
+              <button
+                type="button"
+                className="text-button json-expand-toggle"
+                onClick={() =>
+                  setExpanded(new Set(allExpanded ? [] : branches))
+                }
+              >
+                {allExpanded ? "Collapse all" : "Expand all"}
+              </button>
             )}
             <button
               type="button"
@@ -264,7 +262,20 @@ export function JsonViewer({
             aria-label="Find JSON keys or values"
             placeholder="Find keys or values…"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value;
+              setQuery(next);
+              if (next && parsed.root) {
+                const found = searchJson(parsed.root, next);
+                setExpanded(
+                  new Set(
+                    branchIds(parsed.root).filter((id) =>
+                      found.visible.has(id),
+                    ),
+                  ),
+                );
+              }
+            }}
           />
           {query && (
             <>
@@ -295,8 +306,9 @@ export function JsonViewer({
       <section
         className="json-viewer-content"
         id={`${id}-panel`}
-        role="tabpanel"
-        aria-labelledby={`${id}-${mode}`}
+        role={value.sqlNull ? "region" : "tabpanel"}
+        aria-label={value.sqlNull ? "SQL NULL" : undefined}
+        aria-labelledby={value.sqlNull ? undefined : `${id}-${mode}`}
       >
         {value.sqlNull ? (
           <div className="json-viewer-empty">
