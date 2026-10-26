@@ -18,13 +18,17 @@ The downloadable alpha is ad-hoc signed and **not notarized by Apple**. Gatekeep
 
 - PostgreSQL and SQLite connections saved on this device; Save independently or Save & connect.
 - Test connection; verified TLS for remote PostgreSQL.
+- Connection menus to edit settings or remove saved connections and Keychain passwords without deleting database data.
 - Optional password storage in macOS Keychain; passwords are never written to the connections file or browser storage.
 - Tables/views and empty PostgreSQL schemas in the explorer, with catalog refresh.
 - Right-click / … object menus: open, copy, SQL templates, rename and confirmed Drop.
 - Table workspace with Data, Structure, Indexes, Relations, and SQL views.
 - Declared incoming/outgoing foreign keys, compound keys, and a focused draggable relationship graph.
 - Database Relations overview across all visible objects, with schema/search filters and cross-schema FK links.
-- SQL editor with syntax highlighting, table-name completions, multiple tabs, and ⌘ Enter.
+- SQL editor with syntax highlighting, schema-qualified table completions, multiple tabs, and ⌘ Enter.
+- Searchable session query history with SQL previews, status, timing, and opening in a new tab.
+- Named saved scripts persisted on this device, with search, edit, update, and removal.
+- Daily GitHub Release update checks, manual checks, and download links; no account required.
 - Auto run read-only queries every 1, 3, 5 or custom seconds; stops on errors, query/tab changes, editing, disconnection or hiding the window; see [auto run](docs/auto-run.md).
 - SQL available immediately, including DDL/DML and multi-statement scripts; access is enforced by PostgreSQL roles or SQLite file permissions.
 - Selected-SQL execution with ⌘ Enter, statement result switching and affected row counts.
@@ -35,7 +39,7 @@ The downloadable alpha is ad-hoc signed and **not notarized by Apple**. Gatekeep
 - Light, Dark, and System appearance.
 - A real SQLite sample database via **Explore a sample**.
 
-SQL runs directly with the connected database user or SQLite file permissions; no Full SQL toggle is required. MongoDB, SSH tunnels, and backup/restore are not implemented. Table SQL definitions are read-only previews. MySQL is intentionally out of scope. SQL tabs/results live in memory and are discarded when the app exits.
+SQL runs directly with the connected database user or SQLite file permissions; no Full SQL toggle is required. MongoDB, SSH tunnels, and backup/restore are not implemented. Table SQL definitions are read-only previews. MySQL is intentionally out of scope. SQL tabs/results and query history live in memory and are discarded when the app exits. Explicitly saved scripts persist in local WebView storage.
 
 ## Run locally
 

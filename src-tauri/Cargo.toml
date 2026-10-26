@@ -1,6 +1,6 @@
 [package]
 name = "dum-e"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 description = "Your little database helper"
 license = "MIT"
 repository = "https://github.com/duckfollow/dum-e"
