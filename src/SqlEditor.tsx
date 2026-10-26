@@ -1,6 +1,10 @@
+import { tableCompletionSource } from "./sql-completion";
 import { useEffect, useRef } from "react";
 import { EditorView, keymap } from "@codemirror/view";
 import { Compartment, EditorState } from "@codemirror/state";
+import { syntaxHighlighting } from "@codemirror/language";
+import { classHighlighter } from "@lezer/highlight";
+import "./sql-highlight.css";
 import { basicSetup } from "codemirror";
 import { sql, PostgreSQL, SQLite } from "@codemirror/lang-sql";
 import type { Driver, Table } from "./model";
@@ -48,6 +52,7 @@ export function SqlEditor({
             },
           ]),
           basicSetup,
+          syntaxHighlighting(classHighlighter),
           config.current.of([]),
           EditorView.lineWrapping,
           EditorView.updateListener.of((u) => {
@@ -78,13 +83,15 @@ export function SqlEditor({
     }
   }, [value]);
   useEffect(() => {
-    const schema: Record<string, string[]> = {};
-    for (const table of tables) schema[table.name] = [];
+    const dialect = driver === "postgres" ? PostgreSQL : SQLite;
     view.current?.dispatch({
       effects: config.current.reconfigure([
         EditorState.readOnly.of(readOnly),
         EditorView.editable.of(!readOnly),
-        sql({ dialect: driver === "postgres" ? PostgreSQL : SQLite, schema }),
+        sql({ dialect }),
+        dialect.language.data.of({
+          autocomplete: tableCompletionSource(tables),
+        }),
         EditorView.theme(
           {
             "&": { height: "100%", backgroundColor: "var(--editor)" },

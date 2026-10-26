@@ -1,3 +1,10 @@
+import { SavedScripts } from "./SavedScripts";
+import {
+  readSavedScripts,
+  writeSavedScripts,
+  type SavedScript,
+} from "./saved-scripts";
+import { QueryHistory, type QueryHistoryEntry } from "./QueryHistory";
 import { JsonCell } from "./JsonCell";
 import { JsonViewer } from "./JsonViewer";
 import type { JsonDocument } from "./json-viewer-model";
@@ -23,7 +30,7 @@ import {
   Unplug,
   ArrowUpDown,
   Check,
-  Clock3,
+  RotateCcwClock,
   ShieldCheck,
   FolderOpen,
   ArrowRight,
@@ -121,6 +128,30 @@ function DriverMark({
 const emptySql =
   "-- A little help with your data.\n-- Run your query with ⌘ Enter.\n\nSELECT 1 AS hello;";
 function App() {
+  const [savedState, setSavedState] = useState<{
+    scripts: SavedScript[];
+    error: string;
+  }>(() => {
+    try {
+      return { scripts: readSavedScripts(localStorage), error: "" };
+    } catch {
+      return {
+        scripts: [],
+        error:
+          "Saved scripts could not be read. Existing data has not been changed.",
+      };
+    }
+  });
+  const [scriptsOpen, setScriptsOpen] = useState(false);
+  const [scriptDraft, setScriptDraft] = useState<SavedScript | null>(null);
+  function persistScripts(scripts: SavedScript[]) {
+    if (savedState.error) throw new Error(savedState.error);
+    writeSavedScripts(localStorage, scripts);
+    setSavedState({ scripts, error: "" });
+  }
+
+  const [history, setHistory] = useState<QueryHistoryEntry[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [jsonViewer, setJsonViewer] = useState<JsonDocument | null>(null);
   const [editing, setEditing] = useState(false);
   const editingRef = useRef(false);
@@ -234,6 +265,28 @@ function App() {
       setBusy(tab.id);
       if (page !== tab.page || sqlText !== tab.sql) setSelectedRow(null);
     }
+    const startedAt = Date.now();
+    const recordHistory = (elapsedMs: number, error?: string) => {
+      if (automatic) return;
+      setHistory((entries) =>
+        [
+          {
+            id: crypto.randomUUID(),
+            profileId: tab.profileId,
+            driver: connections[tab.profileId].profile.driver,
+            connectionName:
+              connections[tab.profileId].profile.name ||
+              connections[tab.profileId].profile.database ||
+              "Database",
+            sql: sqlText,
+            startedAt,
+            elapsedMs,
+            error,
+          },
+          ...entries,
+        ].slice(0, 200),
+      );
+    };
     const requestId = crypto.randomUUID();
     queryId.current = requestId;
     if (!automatic)
@@ -247,6 +300,7 @@ function App() {
           requestId,
           sql: sqlText,
         });
+        recordHistory(execution.elapsedMs, execution.error);
         patch(tab.id, {
           execution,
           result: execution.results.at(-1)
@@ -264,6 +318,7 @@ function App() {
           requestId,
           sql: sqlText,
         });
+        recordHistory(result.elapsedMs);
         if (automatic) {
           setTabs((ts) => {
             let changed = false;
@@ -286,6 +341,7 @@ function App() {
       }
       return true;
     } catch (e) {
+      recordHistory(Date.now() - startedAt, String(e));
       if (automatic) {
         setTabs((ts) =>
           ts.map((t) =>
@@ -883,6 +939,7 @@ function App() {
               <>
                 {active.table && (
                   <TableWorkbench
+                    driver={dialectProfile?.driver || "sqlite"}
                     key={`${active.id}-${catalogRevision}`}
                     connectionId={active.profileId}
                     table={active.table}
@@ -926,6 +983,8 @@ function App() {
                           suspended={
                             !!editing ||
                             !!jsonViewer ||
+                            historyOpen ||
+                            scriptsOpen ||
                             !!modal ||
                             connecting ||
                             (!!active.tableView && active.tableView !== "data")
@@ -1008,9 +1067,60 @@ function App() {
                           ? "Full SQL · Runs the selected SQL or entire script · Changes apply directly"
                           : "SELECT & WITH queries · 200-row preview · 15s statement limit"}
                       </span>
-                      <span>
-                        UTF-8 <span className="foot-dot">·</span> SQL
-                      </span>
+                      <div className="editor-foot-actions">
+                        <div
+                          className="editor-script-actions"
+                          role="group"
+                          aria-label="SQL scripts"
+                        >
+                          <button
+                            className="icon-button"
+                            title="Query history"
+                            aria-label="Query history"
+                            onClick={() => setHistoryOpen(true)}
+                          >
+                            <RotateCcwClock size={16} />
+                          </button>
+                          <button
+                            className="icon-button"
+                            title="Save script"
+                            aria-label="Save script"
+                            disabled={!active.sql.trim()}
+                            onClick={() => {
+                              const existing = savedState.scripts.find(
+                                (script) => script.id === active.savedScriptId,
+                              );
+                              setScriptDraft({
+                                id: existing?.id || crypto.randomUUID(),
+                                name: existing?.name || active.title,
+                                sql: active.sql,
+                                profileId: active.profileId,
+                                connectionName:
+                                  dialectProfile?.name || "Database",
+                                driver: dialectProfile?.driver || "sqlite",
+                                updatedAt: Date.now(),
+                              });
+                              setScriptsOpen(true);
+                            }}
+                          >
+                            <Save size={16} />
+                          </button>
+                          <button
+                            className="icon-button"
+                            title="Saved scripts"
+                            aria-label="Saved scripts"
+                            onClick={() => {
+                              setScriptDraft(null);
+                              setScriptsOpen(true);
+                            }}
+                          >
+                            <FolderOpen size={16} />
+                          </button>
+                        </div>
+                        <span className="editor-encoding">
+                          UTF-8 <span className="foot-dot">·</span> SQL
+                        </span>
+                      </div>
                     </div>
                   </div>
                   {active.execution && (
@@ -1488,14 +1598,89 @@ function App() {
             )}
           </div>
           <div>
-            <span>
-              <Clock3 size={11} /> Session only query history
-            </span>
+            <button
+              className="history-trigger"
+              onClick={() => setHistoryOpen(true)}
+              title="Query history"
+            >
+              <RotateCcwClock size={11} /> Query history ({history.length}) ·
+              Session only
+            </button>
             <span className="status-separator">/</span>
-            <span>Made for the workbench.</span>
+            <button
+              className="history-trigger"
+              onClick={() => {
+                setScriptDraft(null);
+                setScriptsOpen(true);
+              }}
+            >
+              <FolderOpen size={11} /> Saved scripts (
+              {savedState.scripts.length})
+            </button>
           </div>
         </footer>
       </main>
+      {scriptsOpen && (
+        <SavedScripts
+          scripts={savedState.scripts}
+          draft={scriptDraft}
+          loadError={savedState.error}
+          onClose={() => setScriptsOpen(false)}
+          onSave={(script) => {
+            persistScripts([
+              script,
+              ...savedState.scripts.filter((item) => item.id !== script.id),
+            ]);
+            if (scriptDraft?.id === script.id && active)
+              patch(active.id, {
+                savedScriptId: script.id,
+                title: script.name,
+              });
+            setToast("Script saved.");
+          }}
+          onDelete={(id) =>
+            persistScripts(
+              savedState.scripts.filter((script) => script.id !== id),
+            )
+          }
+          onOpen={(script) => {
+            if (guardEdits()) return;
+            const tab: QueryTab = {
+              id: crypto.randomUUID(),
+              savedScriptId: script.id,
+              profileId: script.profileId,
+              title: script.name,
+              sql: script.sql,
+              page: 0,
+            };
+            setTabs((tabs) => [...tabs, tab]);
+            setActiveId(tab.id);
+            setSelectedId(script.profileId);
+            setScriptsOpen(false);
+          }}
+        />
+      )}
+      {historyOpen && (
+        <QueryHistory
+          entries={history}
+          onClose={() => setHistoryOpen(false)}
+          onClear={() => setHistory([])}
+          onOpen={(entry) => {
+            if (guardEdits()) return;
+            const tab: QueryTab = {
+              id: crypto.randomUUID(),
+              profileId: entry.profileId,
+              title: "History query",
+              sql: entry.sql,
+              page: 0,
+            };
+            setTabs((tabs) => [...tabs, tab]);
+            setActiveId(tab.id);
+            setSelectedId(entry.profileId);
+            setHistoryOpen(false);
+          }}
+        />
+      )}
       {jsonViewer && (
         <JsonViewer value={jsonViewer} onClose={() => setJsonViewer(null)} />
       )}

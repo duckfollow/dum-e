@@ -1,0 +1,30 @@
+.sql-highlight .tok-keyword,
+.sql-editor .tok-keyword {
+  color: var(--accent);
+}
+.sql-highlight .tok-string,
+.sql-editor .tok-string {
+  color: var(--green);
+}
+.sql-highlight .tok-number,
+.sql-editor .tok-number,
+.sql-highlight .tok-bool,
+.sql-editor .tok-bool,
+.sql-highlight .tok-atom,
+.sql-editor .tok-atom {
+  color: var(--blue);
+}
+.sql-highlight .tok-comment,
+.sql-editor .tok-comment {
+  color: var(--muted);
+  font-style: italic;
+}
+.sql-highlight .tok-operator,
+.sql-editor .tok-operator,
+.sql-highlight .tok-typeName,
+.sql-editor .tok-typeName {
+  color: var(--secondary);
+}
+.sql-highlight code {
+  font: inherit;
+}

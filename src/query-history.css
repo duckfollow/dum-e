@@ -1,0 +1,137 @@
+.query-history {
+  width: min(800px, calc(100vw - 48px));
+  max-height: min(760px, calc(100vh - 64px));
+  padding: 0;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+.query-history::backdrop {
+  background: #0007;
+}
+.query-history header,
+.history-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+}
+.query-history header {
+  border-bottom: 1px solid var(--line);
+}
+.query-history h2 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 15px;
+  margin: 0;
+}
+.history-tools label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  color: var(--secondary);
+}
+.history-tools input {
+  width: 100%;
+  min-width: 0;
+}
+.history-note {
+  color: var(--muted);
+  margin: 0;
+  padding: 0 20px 14px;
+  font-size: 11px;
+}
+.history-list {
+  overflow: auto;
+  max-height: calc(100vh - 260px);
+  padding: 0 20px 20px;
+}
+.history-list article {
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+.history-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--secondary);
+  font-size: 11px;
+}
+.history-meta strong {
+  color: var(--text);
+  margin-right: auto;
+}
+.history-list pre {
+  font: 12px/1.6 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 180px;
+  overflow: auto;
+  background: var(--editor);
+  padding: 12px;
+  border-radius: 6px;
+}
+.history-error {
+  color: var(--red);
+  overflow-wrap: anywhere;
+}
+.history-success {
+  color: var(--green);
+}
+.history-empty {
+  padding: 48px 12px;
+  text-align: center;
+  color: var(--muted);
+}
+.statusbar .history-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font-size: inherit;
+}
+.saved-script-form {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.saved-script-form label {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.saved-script-form textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 100px;
+  max-height: 220px;
+  font-family: var(--mono);
+  background: var(--editor);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+}
+.saved-script-form .history-note {
+  padding: 0 0 12px;
+}
+.saved-script-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.saved-script-message {
+  padding: 0 20px;
+}
+.saved-scripts .history-list {
+  max-height: 42vh;
+}

@@ -1,3 +1,5 @@
+import { SqlPreview } from "./SqlPreview";
+import type { Driver } from "./model";
 import { useEffect, useId, useRef, useState } from "react";
 import {
   Table2,
@@ -42,6 +44,7 @@ const views = [
 ] as const;
 export function TableWorkbench({
   connectionId,
+  driver,
   table,
   connected,
   visibleTables,
@@ -50,6 +53,7 @@ export function TableWorkbench({
   onOpen,
 }: {
   connectionId: string;
+  driver: Driver;
   table: Table;
   connected: boolean;
   visibleTables: Table[];
@@ -256,13 +260,25 @@ export function TableWorkbench({
                                 </span>
                               </td>
                               <td>
-                                <code className="metadata-expression">
-                                  {column.identity
-                                    ? `GENERATED ${column.identity} AS IDENTITY`
-                                    : (column.defaultValue ?? "—")}
-                                </code>
+                                <SqlPreview
+                                  inline
+                                  className="metadata-expression"
+                                  sql={
+                                    column.identity
+                                      ? `GENERATED ${column.identity} AS IDENTITY`
+                                      : (column.defaultValue ?? "—")
+                                  }
+                                  driver={driver}
+                                />
                                 {column.generated && (
-                                  <small>Generated: {column.generated}</small>
+                                  <small>
+                                    Generated:{" "}
+                                    <SqlPreview
+                                      inline
+                                      sql={column.generated}
+                                      driver={driver}
+                                    />
+                                  </small>
                                 )}
                               </td>
                               <td>
@@ -302,7 +318,11 @@ export function TableWorkbench({
                                 </span>
                                 <b>{constraint.name || "Name not exposed"}</b>
                               </div>
-                              <code>{constraint.definition}</code>
+                              <SqlPreview
+                                inline
+                                sql={constraint.definition}
+                                driver={driver}
+                              />
                             </article>
                           ))}
                         </div>
@@ -355,7 +375,11 @@ export function TableWorkbench({
                             {index.parts.map((part, i) => (
                               <li key={i}>
                                 <span>{i + 1}</span>
-                                <code>{part.expression}</code>
+                                <SqlPreview
+                                  inline
+                                  sql={part.expression}
+                                  driver={driver}
+                                />
                                 <small>
                                   {part.role}
                                   {part.descending === true
@@ -369,7 +393,12 @@ export function TableWorkbench({
                           </ol>
                           {index.predicate && (
                             <p className="index-predicate">
-                              <b>WHERE</b> <code>{index.predicate}</code>
+                              <b>WHERE</b>{" "}
+                              <SqlPreview
+                                inline
+                                sql={index.predicate}
+                                driver={driver}
+                              />
                             </p>
                           )}
                           {index.partial && !index.predicate && (
@@ -381,7 +410,10 @@ export function TableWorkbench({
                           {index.definition ? (
                             <details className="index-definition">
                               <summary>SQL definition</summary>
-                              <pre>{index.definition}</pre>
+                              <SqlPreview
+                                sql={index.definition}
+                                driver={driver}
+                              />
                             </details>
                           ) : (
                             <p className="metadata-hint">
@@ -536,9 +568,11 @@ export function TableWorkbench({
                       </p>
                     )}
                     {details.definition ? (
-                      <pre className="table-definition">
-                        {details.definition}
-                      </pre>
+                      <SqlPreview
+                        className="table-definition"
+                        sql={details.definition}
+                        driver={driver}
+                      />
                     ) : (
                       <p className="metadata-empty">
                         A SQL definition is not available for this object type.

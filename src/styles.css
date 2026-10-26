@@ -816,10 +816,30 @@ p {
   border-top: 1px solid var(--line);
   flex-shrink: 0;
 }
-.editor-foot > span {
+.editor-foot > span,
+.editor-foot-actions,
+.editor-script-actions,
+.editor-encoding {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.editor-foot {
+  flex-wrap: wrap;
+}
+.editor-foot-actions {
+  margin-left: auto;
+  flex-shrink: 0;
+  gap: 12px;
+}
+.editor-script-actions {
+  gap: 4px;
+  padding-right: 12px;
+  border-right: 1px solid var(--line);
+}
+.editor-script-actions .icon-button {
+  width: 24px;
+  height: 24px;
 }
 .foot-dot {
   opacity: 0.4;

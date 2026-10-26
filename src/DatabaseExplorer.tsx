@@ -1,3 +1,4 @@
+import { SqlPreview } from "./SqlPreview";
 import { useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
@@ -554,7 +555,11 @@ export function DatabaseExplorer({
                 RESTRICT.
               </p>
             )}
-            <pre>{sql || validation}</pre>
+            {sql ? (
+              <SqlPreview sql={sql} driver={driver} />
+            ) : (
+              <pre>{validation}</pre>
+            )}
             {error && (
               <div role="alert" className="object-error">
                 <AlertCircle size={16} />

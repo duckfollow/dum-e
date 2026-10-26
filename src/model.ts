@@ -43,6 +43,7 @@ export interface Connected {
   schemas?: string[];
 }
 export interface QueryTab {
+  savedScriptId?: string;
   id: string;
   profileId: string;
   title: string;
