@@ -1,3 +1,6 @@
+import { RemoveConnectionDialog } from "./RemoveConnectionDialog";
+import { ConnectionMenu } from "./ConnectionMenu";
+import { UpdateNotice } from "./UpdateNotice";
 import { SavedScripts } from "./SavedScripts";
 import {
   readSavedScripts,
@@ -168,6 +171,9 @@ function App() {
     [tableSearch, setTableSearch] = useState(""),
     [filter, setFilter] = useState(""),
     [sort, setSort] = useState<{ index: number; asc: boolean } | null>(null);
+  const [removingConnection, setRemovingConnection] = useState<Profile | null>(
+    null,
+  );
   const [modal, setModal] = useState<Profile | null>(null),
     [message, setMessage] = useState(""),
     [toast, setToast] = useState(""),
@@ -448,6 +454,33 @@ function App() {
       setActiveId(t.id);
     }
   }
+  async function editConnection(p: Profile) {
+    if (guardEdits()) return;
+    if (busyRef.current || connecting) {
+      setToast(
+        "Wait for the current operation to finish before editing a connection.",
+      );
+      return;
+    }
+    busyRef.current = true;
+    setConnecting(true);
+    try {
+      if (connections[p.id]) {
+        await api("disconnect_database", { id: p.id });
+        setConnections((current) => {
+          const next = { ...current };
+          delete next[p.id];
+          return next;
+        });
+      }
+      setModal({ ...p });
+    } catch (error) {
+      setMessage(String(error));
+    } finally {
+      busyRef.current = false;
+      setConnecting(false);
+    }
+  }
   async function selectProfile(p: Profile) {
     if (guardEdits()) return;
     if (connections[p.id]) {
@@ -568,26 +601,39 @@ function App() {
         </div>
         <div className="connection-list">
           {profiles.map((p) => (
-            <button
+            <div
+              className={`connection-row ${profile?.id === p.id ? "selected" : ""}`}
               key={p.id}
-              className={`connection-item ${profile?.id === p.id ? "selected" : ""}`}
-              onClick={() => void selectProfile(p)}
-              disabled={connecting || editing}
             >
-              <DriverMark driver={p.driver} small />
-              <span>
-                <b>{p.name}</b>
-                <small>
-                  {p.driver === "sqlite"
-                    ? "SQLite · local file"
-                    : `${p.host}:${p.port}`}
-                </small>
-              </span>
-              <span
-                className={`connection-dot ${connections[p.id] ? "online" : ""}`}
-                title={connections[p.id] ? "Connected" : "Disconnected"}
+              <button
+                className="connection-item"
+                onClick={() => void selectProfile(p)}
+                disabled={connecting || editing}
+              >
+                <DriverMark driver={p.driver} small />
+                <span>
+                  <b>{p.name}</b>
+                  <small>
+                    {p.driver === "sqlite"
+                      ? "SQLite · local file"
+                      : `${p.host}:${p.port}`}
+                  </small>
+                </span>
+                <span
+                  className={`connection-dot ${connections[p.id] ? "online" : ""}`}
+                  title={connections[p.id] ? "Connected" : "Disconnected"}
+                />
+              </button>
+              <ConnectionMenu
+                name={p.name}
+                connected={!!connections[p.id]}
+                disabled={connecting || editing || !!busy}
+                onEdit={() => void editConnection(p)}
+                onRemove={() => {
+                  if (!guardEdits()) setRemovingConnection(p);
+                }}
               />
-            </button>
+            </div>
           ))}
           {!profiles.length && (
             <p className="sidebar-empty">
@@ -721,8 +767,9 @@ function App() {
             <ShieldCheck size={15} />
             <span>On your machine. In your hands.</span>
           </div>
+          <UpdateNotice />
           <div className="sidebar-footer">
-            <span>v0.1.0-alpha.1</span>
+            <span>Appearance</span>
             <div className="theme-controls" aria-label="Appearance">
               {[
                 { value: "light", label: "Light", Icon: Sun },
@@ -986,6 +1033,7 @@ function App() {
                             historyOpen ||
                             scriptsOpen ||
                             !!modal ||
+                            !!removingConnection ||
                             connecting ||
                             (!!active.tableView && active.tableView !== "data")
                           }
@@ -1684,8 +1732,45 @@ function App() {
       {jsonViewer && (
         <JsonViewer value={jsonViewer} onClose={() => setJsonViewer(null)} />
       )}
+      {removingConnection && (
+        <RemoveConnectionDialog
+          profile={removingConnection}
+          connected={!!connections[removingConnection.id]}
+          onClose={() => setRemovingConnection(null)}
+          onRemove={async () => {
+            if (guardEdits())
+              throw new Error("Save or discard table changes first.");
+            if (busyRef.current || connecting)
+              throw new Error("Wait for the current operation to finish.");
+            const id = removingConnection.id;
+            busyRef.current = true;
+            setConnecting(true);
+            try {
+              if (connections[id]) {
+                await api("disconnect_database", { id });
+                setConnections((current) => {
+                  const next = { ...current };
+                  delete next[id];
+                  return next;
+                });
+              }
+              await api("remove_connection", { id });
+              setProfiles((current) =>
+                current.filter((profile) => profile.id !== id),
+              );
+              setSelectedId((current) => (current === id ? "" : current));
+              setRemovingConnection(null);
+              setToast("Connection removed. Your database is unchanged.");
+            } finally {
+              busyRef.current = false;
+              setConnecting(false);
+            }
+          }}
+        />
+      )}
       {modal && (
         <ConnectionDialog
+          key={modal.id}
           profile={modal}
           saved={profiles.some((p) => p.id === modal.id)}
           onClose={() => setModal(null)}

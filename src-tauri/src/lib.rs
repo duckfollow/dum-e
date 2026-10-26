@@ -3,6 +3,7 @@ mod editing;
 mod execution;
 mod metadata;
 mod relations;
+mod updates;
 use db::{Profile, QueryResult, Table};
 use serde::Serialize;
 use std::{
@@ -49,7 +50,9 @@ fn persist(app: &tauri::AppHandle, profile: &Profile) -> Result<(), String> {
     let mut profiles = read_profiles(app)?;
     profiles.retain(|p| p.id != profile.id);
     profiles.push(profile.clone());
-    let path = saved_path(app)?;
+    write_profiles(&saved_path(app)?, &profiles)
+}
+fn write_profiles(path: &std::path::Path, profiles: &[Profile]) -> Result<(), String> {
     let temp = path.with_extension("json.next");
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
@@ -60,7 +63,7 @@ fn persist(app: &tauri::AppHandle, profile: &Profile) -> Result<(), String> {
     }
     use std::io::Write;
     let mut f = options.open(&temp).map_err(|e| e.to_string())?;
-    f.write_all(&serde_json::to_vec_pretty(&profiles).map_err(|e| e.to_string())?)
+    f.write_all(&serde_json::to_vec_pretty(profiles).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
     f.sync_all().map_err(|e| e.to_string())?;
     std::fs::rename(temp, path).map_err(|e| e.to_string())
@@ -161,6 +164,34 @@ async fn save_connection(
     let _guard = state.storage.lock().map_err(|_| "Storage busy")?;
     persist(&app, &profile)?;
     Ok(profile)
+}
+#[tauri::command]
+async fn remove_connection(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Workspace>,
+    id: String,
+) -> Result<(), String> {
+    uuid::Uuid::parse_str(&id).map_err(|_| "Invalid connection identifier")?;
+    if state
+        .sessions
+        .lock()
+        .map_err(|_| "Workspace busy")?
+        .contains_key(&id)
+    {
+        return Err("Disconnect before removing a saved connection.".into());
+    }
+    let exists = {
+        let _guard = state.storage.lock().map_err(|_| "Storage busy")?;
+        read_profiles(&app)?.iter().any(|p| p.id == id)
+    };
+    if !exists {
+        return Ok(());
+    }
+    save_password(id.clone(), String::new(), false).await?;
+    let _guard = state.storage.lock().map_err(|_| "Storage busy")?;
+    let mut profiles = read_profiles(&app)?;
+    profiles.retain(|p| p.id != id);
+    write_profiles(&saved_path(&app)?, &profiles)
 }
 #[tauri::command]
 async fn test_connection(profile: Profile, password: String) -> Result<(), String> {
@@ -446,8 +477,11 @@ pub fn run() {
         .manage(Workspace::default())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            updates::check_for_updates,
+            updates::open_release_page,
             list_connections,
             save_connection,
+            remove_connection,
             test_connection,
             connect_database,
             disconnect_database,
@@ -464,4 +498,43 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("Unable to start Dum-E");
+}
+
+#[cfg(test)]
+mod connection_storage_tests {
+    use super::*;
+    #[test]
+    fn removing_profile_preserves_other_settings_and_writes_empty_list() {
+        let dir = std::env::temp_dir().join(format!("dum-e-storage-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("connections.json");
+        let make = |name: &str| Profile {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: name.into(),
+            driver: "sqlite".into(),
+            host: String::new(),
+            port: 5432,
+            database: String::new(),
+            username: String::new(),
+            path: "/unused-test.sqlite".into(),
+            tls: false,
+            remember_password: false,
+        };
+        let first = make("first");
+        let second = make("second");
+        write_profiles(&path, &[first.clone(), second.clone()]).unwrap();
+        let mut profiles: Vec<Profile> =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        profiles.retain(|p| p.id != first.id);
+        write_profiles(&path, &profiles).unwrap();
+        let remaining: Vec<Profile> =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, second.id);
+        assert_eq!(remaining[0].path, second.path);
+        write_profiles(&path, &[]).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[]");
+        assert!(!path.with_extension("json.next").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

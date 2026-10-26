@@ -1628,3 +1628,100 @@ p {
   flex-shrink: 0;
   animation: none;
 }
+
+.connection-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  position: relative;
+}
+.connection-row > .connection-item {
+  flex: 1;
+  min-width: 0;
+}
+.connection-menu {
+  flex-shrink: 0;
+}
+.connection-menu-trigger {
+  width: 26px;
+  height: 30px;
+}
+.connection-menu-panel {
+  position: fixed;
+  width: 240px;
+  z-index: 30;
+  padding: 4px;
+  min-width: 180px;
+  max-width: 240px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.connection-menu-panel button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 10px;
+  font-size: 11px;
+}
+.connection-menu-panel button:hover,
+.connection-menu-panel button:focus-visible {
+  background: var(--hover);
+}
+.connection-row {
+  gap: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding-right: 7px;
+}
+.connection-row:hover {
+  background: var(--hover);
+}
+.connection-row.selected {
+  background: var(--accent-dim);
+  border-color: #b98a4233;
+}
+.connection-row > .connection-item {
+  border: 0;
+  background: transparent;
+  padding: 11px 10px;
+}
+.connection-menu-trigger {
+  width: 28px;
+  height: 28px;
+  border-radius: 5px;
+}
+.connection-row.selected .connection-menu-trigger {
+  color: var(--secondary);
+}
+.connection-menu-trigger[aria-expanded="true"] {
+  background: var(--hover);
+  color: var(--text);
+}
+.connection-menu-divider {
+  margin: 4px 6px;
+  border-top: 1px solid var(--line);
+}
+.connection-menu-panel .connection-remove-action {
+  color: var(--red);
+}
+.remove-connection-note {
+  color: var(--secondary);
+  font-size: 12px;
+}
+.remove-connection-button {
+  color: var(--panel);
+  background: var(--red);
+  padding: 10px 14px;
+  border-radius: 6px;
+  gap: 7px;
+}
+.remove-connection-dialog {
+  max-width: 480px;
+}
+.remove-connection-dialog .dialog-title-icon {
+  color: var(--red);
+}

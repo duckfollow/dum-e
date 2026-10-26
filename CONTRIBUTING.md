@@ -40,3 +40,15 @@ python3 scripts/third-party-notices.py
 ```
 
 This requires Python 3, Cargo, and network access for license texts omitted from registry packages. Missing license texts are fetched from the crate's recorded upstream commit.
+
+## Update notifications
+
+Dum-E checks the public `duckfollow/dum-e` GitHub Releases feed from the native app. No API token or separate update server is required. Automatic checks run on launch when the last attempt was at least 24 hours ago, and hourly while open to check whether another daily attempt is due. Users can also select **Check for updates** in the sidebar. Automatic network failures stay quiet; manual checks show an error and can be retried.
+
+To publish an update:
+
+1. Update the version in `package.json` (and its lockfile), `src-tauri/Cargo.toml` (and its lockfile), and `src-tauri/tauri.conf.json` together.
+2. Build and verify the app, then upload the installer to a GitHub Release tagged with a semantic version such as `v0.1.0-alpha.2` or `v0.1.0`.
+3. Publish the release. Drafts and tags without a published Release are ignored. Mark preview releases as prereleases.
+
+Preview builds receive newer preview and stable versions; stable builds receive only stable versions. The highest newer semantic version among the most recent 100 releases is offered. Build metadata alone does not trigger an update. **Download** opens the release page in the default browser so users can choose the installer; the app does not install updates automatically. Version checks send the app version in the User-Agent and do not include connection details or SQL.

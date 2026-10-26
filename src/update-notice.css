@@ -1,0 +1,70 @@
+.app-updates {
+  padding: 8px 3px;
+  border-top: 1px solid var(--line);
+}
+.update-check-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 9px;
+}
+.update-check-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  padding: 5px 0;
+  background: transparent;
+  color: var(--secondary);
+  font-size: 9px;
+}
+.update-check-button:hover {
+  color: var(--text);
+}
+.update-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--accent-dim);
+  font-size: 11px;
+}
+.update-card strong {
+  color: var(--accent);
+}
+.update-card > div {
+  display: flex;
+  gap: 6px;
+}
+.update-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--secondary);
+  overflow-wrap: anywhere;
+}
+.update-message .icon-button {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.update-spinning {
+  animation: update-spin 1s linear infinite;
+}
+@keyframes update-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .update-spinning {
+    animation: none;
+  }
+}
