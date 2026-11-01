@@ -1,3 +1,4 @@
+import type { TableDetailsCache } from "./table-details-cache";
 import { SqlPreview } from "./SqlPreview";
 import type { Driver } from "./model";
 import { useEffect, useId, useRef, useState } from "react";
@@ -20,7 +21,6 @@ import {
   RotateCcw,
   ShieldCheck,
 } from "lucide-react";
-import { api } from "./api";
 import type { Table } from "./model";
 import {
   focusGraph,
@@ -44,6 +44,7 @@ const views = [
 ] as const;
 export function TableWorkbench({
   connectionId,
+  cache,
   driver,
   table,
   connected,
@@ -53,6 +54,7 @@ export function TableWorkbench({
   onOpen,
 }: {
   connectionId: string;
+  cache: TableDetailsCache;
   driver: Driver;
   table: Table;
   connected: boolean;
@@ -61,9 +63,11 @@ export function TableWorkbench({
   onView: (view: TableView) => void;
   onOpen: (table: Table) => void;
 }) {
-  const [details, setDetails] = useState<TableDetails | null>(null),
+  const [details, setDetails] = useState<TableDetails | null>(() =>
+      cache.peek(connectionId, table),
+    ),
     [error, setError] = useState(""),
-    [loading, setLoading] = useState(true),
+    [loading, setLoading] = useState(() => !cache.peek(connectionId, table)),
     [revision, setRevision] = useState(0),
     [copied, setCopied] = useState(false),
     [copyError, setCopyError] = useState("");
@@ -72,15 +76,17 @@ export function TableWorkbench({
   useEffect(() => {
     let disposed = false;
     const request = ++sequence.current;
-    setLoading(true);
+    const cached = cache.peek(connectionId, table);
+    setLoading(!cached);
     setError("");
-    setDetails(null);
+    setDetails(cached);
     if (!connected) {
       setLoading(false);
       setError("Reconnect to this database to inspect its structure.");
       return;
     }
-    void api<TableDetails>("table_details", { id: connectionId, table })
+    void cache
+      .load(connectionId, table, revision > 0)
       .then((value) => {
         if (!disposed && sequence.current === request) setDetails(value);
       })
@@ -93,7 +99,7 @@ export function TableWorkbench({
     return () => {
       disposed = true;
     };
-  }, [connectionId, table.schema, table.name, connected, revision]);
+  }, [cache, connectionId, table.schema, table.name, connected, revision]);
   const open = (target: Table) => {
     const visible = visibleTables.find((t) => sameTable(t, target));
     if (visible) onOpen(visible);

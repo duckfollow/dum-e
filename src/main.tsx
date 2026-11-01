@@ -1,3 +1,5 @@
+import { createTableDetailsCache } from "./table-details-cache";
+import type { TableDetails } from "./table-model";
 import { RemoveConnectionDialog } from "./RemoveConnectionDialog";
 import { ConnectionMenu } from "./ConnectionMenu";
 import { UpdateNotice } from "./UpdateNotice";
@@ -14,7 +16,13 @@ import type { JsonDocument } from "./json-viewer-model";
 import { reconciledResult, refreshedTab } from "./refresh-model";
 import { AutoRun } from "./AutoRun";
 import { EditableGrid } from "./EditableGrid";
-import React, { useEffect, useRef, useState } from "react";
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createRoot } from "react-dom/client";
 import {
   Database,
@@ -166,6 +174,14 @@ function App() {
     [connections, setConnections] = useState<Record<string, Connected>>({}),
     [selectedId, setSelectedId] = useState("");
   const [catalogRevision, setCatalogRevision] = useState(0);
+  const tableDetailsCache = useMemo(
+    () =>
+      createTableDetailsCache((id, table) =>
+        api<TableDetails>("table_details", { id, table }),
+      ),
+    [connections, catalogRevision],
+  );
+  const browseSequence = useRef(0);
   const [tabs, setTabs] = useState<QueryTab[]>([]),
     [activeId, setActiveId] = useState(""),
     [tableSearch, setTableSearch] = useState(""),
@@ -212,7 +228,7 @@ function App() {
         .then(setProfiles)
         .catch((e) => setMessage(String(e)));
   }, []);
-  useEffect(() => {
+  useLayoutEffect(() => {
     setFilter("");
     setSort(null);
     setSelectedRow(null);
@@ -409,10 +425,19 @@ function App() {
         t.table?.schema === table.schema,
     );
     if (existing) {
+      ++browseSequence.current;
       if (view) patch(existing.id, { tableView: view });
       setActiveId(existing.id);
       return;
     }
+    if (busyRef.current) {
+      setToast(
+        "Wait for the current query to finish before opening another table.",
+      );
+      return;
+    }
+    const request = ++browseSequence.current;
+    const previousId = activeId;
     const tab: QueryTab = {
       id: crypto.randomUUID(),
       profileId: conn.profile.id,
@@ -423,9 +448,15 @@ function App() {
       page: 0,
     };
     setTabs((ts) => [...ts, tab]);
-    setActiveId(tab.id);
-    setSelectedId(conn.profile.id);
+    // Prepare both views before replacing the current grid.
+    const metadata = tableDetailsCache
+      .load(conn.profile.id, table)
+      .catch(() => null);
     await execute(tab);
+    await metadata;
+    if (browseSequence.current === request && !editingRef.current) {
+      setActiveId((current) => (current === previousId ? tab.id : current));
+    }
   }
   async function didConnect(conn: Connected) {
     setConnections((cs) => ({ ...cs, [conn.profile.id]: conn }));
@@ -945,7 +976,9 @@ function App() {
                       setSelectedId(t.profileId);
                     }}
                   >
-                    {t.overview ? (
+                    {busy === t.id ? (
+                      <LoaderCircle size={14} className="spin" />
+                    ) : t.overview ? (
                       <GitFork size={14} />
                     ) : t.table ? (
                       <Table2 size={14} />
@@ -986,6 +1019,7 @@ function App() {
               <>
                 {active.table && (
                   <TableWorkbench
+                    cache={tableDetailsCache}
                     driver={dialectProfile?.driver || "sqlite"}
                     key={`${active.id}-${catalogRevision}`}
                     connectionId={active.profileId}
@@ -1368,6 +1402,7 @@ function App() {
                         active.sql === tableSql(active.table, active.page) ? (
                           <EditableGrid
                             key={active.id}
+                            cache={tableDetailsCache}
                             tab={active}
                             rows={rows}
                             sort={sort}

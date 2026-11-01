@@ -10,12 +10,15 @@ struct Release {
     tag_name: String,
     draft: bool,
     prerelease: bool,
+    #[serde(default)]
+    body: Option<String>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AvailableUpdate {
     version: String,
     url: String,
+    notes: String,
 }
 fn newest_release(current: &Version, releases: Vec<Release>) -> Option<AvailableUpdate> {
     releases
@@ -36,12 +39,13 @@ fn newest_release(current: &Version, releases: Vec<Release>) -> Option<Available
             {
                 return None;
             }
-            Some((version, release.tag_name))
+            Some((version, release.tag_name, release.body.unwrap_or_default()))
         })
         .max_by(|a, b| a.0.cmp_precedence(&b.0))
-        .map(|(version, tag)| AvailableUpdate {
+        .map(|(version, tag, notes)| AvailableUpdate {
             version: version.to_string(),
             url: format!("{RELEASE_PREFIX}{tag}"),
+            notes,
         })
 }
 #[tauri::command]
@@ -94,6 +98,19 @@ pub async fn open_release_page(url: String) -> Result<(), String> {
     if Version::parse(tag.strip_prefix('v').unwrap_or(tag)).is_err() {
         return Err("Invalid release version.".into());
     }
+    open_browser(url).await
+}
+#[tauri::command]
+pub async fn open_companion_app(app: String) -> Result<(), String> {
+    let repository = match app.as_str() {
+        "edith" => "edith",
+        "ultron" => "ultron",
+        "u" => "u",
+        _ => return Err("Unknown application.".into()),
+    };
+    open_browser(format!("https://github.com/duckfollow/{repository}")).await
+}
+async fn open_browser(url: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         #[cfg(target_os = "macos")]
         let status = std::process::Command::new("open").arg(&url).status();
@@ -119,6 +136,7 @@ mod tests {
     fn release(tag: &str, prerelease: bool, draft: bool) -> Release {
         Release {
             tag_name: tag.into(),
+            body: None,
             prerelease,
             draft,
         }
@@ -146,6 +164,23 @@ mod tests {
         .unwrap();
         assert_eq!(result.version, "1.10.0");
         assert_eq!(result.url, format!("{RELEASE_PREFIX}v1.10.0"));
+    }
+    #[test]
+    fn release_notes_are_preserved_and_optional_in_github_response() {
+        let release: Release = serde_json::from_str(
+            r###"{"tag_name":"v1.1.0","draft":false,"prerelease":false,"body":"## New features\n- Updates UI"}"###,
+        ).unwrap();
+        let update = newest_release(&Version::parse("1.0.0").unwrap(), vec![release]).unwrap();
+        assert_eq!(update.notes, "## New features\n- Updates UI");
+        let without_notes: Release =
+            serde_json::from_str(r###"{"tag_name":"v1.1.0","draft":false,"prerelease":false}"###)
+                .unwrap();
+        assert!(without_notes.body.is_none());
+        let null_notes: Release = serde_json::from_str(
+            r#"{"tag_name":"v1.1.0","draft":false,"prerelease":false,"body":null}"#,
+        )
+        .unwrap();
+        assert!(null_notes.body.is_none());
     }
     #[test]
     fn preview_builds_receive_newer_previews_and_stable() {

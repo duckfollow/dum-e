@@ -479,6 +479,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             updates::check_for_updates,
             updates::open_release_page,
+            updates::open_companion_app,
             list_connections,
             save_connection,
             remove_connection,

@@ -1,3 +1,4 @@
+import type { TableDetailsCache } from "./table-details-cache";
 import { JsonCell } from "./JsonCell";
 import type { JsonDocument } from "./json-viewer-model";
 import { useEffect, useRef, useState } from "react";
@@ -28,6 +29,7 @@ type Editor = {
 };
 export function EditableGrid({
   tab,
+  cache,
   rows,
   sort,
   onSort,
@@ -40,6 +42,7 @@ export function EditableGrid({
   onOpenJson,
 }: {
   tab: QueryTab;
+  cache: TableDetailsCache;
   rows: { values: Cell[]; index: number }[];
   sort: { index: number; asc: boolean } | null;
   onSort: (s: { index: number; asc: boolean }) => void;
@@ -52,7 +55,9 @@ export function EditableGrid({
   onOpenJson: (doc: JsonDocument) => void;
 }) {
   const [source, setSource] = useState(tab.result!);
-  const [details, setDetails] = useState<TableDetails | null>(null);
+  const [details, setDetails] = useState<TableDetails | null>(() =>
+    cache.peek(tab.profileId, tab.table!),
+  );
   const [draft, setDraftState] = useState<GridDraft>(emptyDraft);
   const draftRef = useRef(draft);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -81,10 +86,10 @@ export function EditableGrid({
   const pending = count > 0 || !!editor || saving;
   useEffect(() => {
     let disposed = false;
-    void api<TableDetails>("table_details", {
-      id: tab.profileId,
-      table: tab.table,
-    })
+    setDetails(connected ? cache.peek(tab.profileId, tab.table!) : null);
+    if (!connected) return;
+    void cache
+      .load(tab.profileId, tab.table!)
       .then((d) => {
         if (!disposed) setDetails(d);
       })
@@ -94,7 +99,7 @@ export function EditableGrid({
     return () => {
       disposed = true;
     };
-  }, [tab.profileId, tab.table?.schema, tab.table?.name, connected]);
+  }, [cache, tab.profileId, tab.table?.schema, tab.table?.name, connected]);
   useEffect(() => {
     if (!pending && tab.result) {
       setSource(tab.result);
