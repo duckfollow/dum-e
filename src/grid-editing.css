@@ -127,3 +127,55 @@
 .grid-delete-confirm > span {
   margin-right: auto;
 }
+
+.grid-cell-editor textarea {
+  flex: 1;
+  min-width: 160px;
+  padding: 6px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font: 11px var(--mono);
+  resize: vertical;
+}
+
+.grid-json-editor {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  text-align: start;
+}
+.grid-json-header,
+.grid-json-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.grid-json-header strong {
+  overflow-wrap: anywhere;
+}
+.grid-json-header code {
+  color: var(--muted);
+}
+.grid-json-header button {
+  margin-inline-start: auto;
+}
+.grid-json-editor textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  line-height: 1.55;
+  tab-size: 2;
+}
+.grid-json-actions select {
+  margin-inline-end: auto;
+}
+.grid-json-editor textarea:focus-visible {
+  outline: 1px solid var(--accent);
+}

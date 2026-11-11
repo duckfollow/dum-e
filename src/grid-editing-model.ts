@@ -25,6 +25,11 @@ export function mutationCount(draft: GridDraft) {
     draft.inserted.length
   );
 }
+export function originalRow(result: QueryResult, index: number) {
+  return result.rows[index].map(
+    (value, column) => result.jsonRaw?.[index]?.[column] ?? value,
+  );
+}
 export function mutations(draft: GridDraft, result: QueryResult): Mutation[] {
   return [
     ...Object.entries(draft.edits)
@@ -32,7 +37,7 @@ export function mutations(draft: GridDraft, result: QueryResult): Mutation[] {
       .map(([, edit]) => ({ ...edit, operation: "update" as const })),
     ...draft.deleted.map((i) => ({
       operation: "delete" as const,
-      original: result.rows[i],
+      original: originalRow(result, i),
       changes: {},
     })),
     ...draft.inserted.map((row) => ({

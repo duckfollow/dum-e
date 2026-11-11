@@ -9,13 +9,22 @@ export function editableType(type: string) {
     type,
   );
 }
-export function editableColumn(column: ColumnInfo) {
-  return !column.generated && !column.identity && editableType(column.dataType);
+export const jsonColumn = (column: ColumnInfo) =>
+  /^(json|jsonb)$/i.test(column.dataType);
+export function editableColumn(column: ColumnInfo, postgres = false) {
+  return (
+    !column.generated &&
+    !column.identity &&
+    ((postgres && jsonColumn(column)) ||
+      column.enumValues.length > 0 ||
+      editableType(column.dataType))
+  );
 }
 export function editableRow(
   details: TableDetails,
   result: QueryResult,
   row: Cell[],
+  postgres = false,
 ) {
   const keys = details.columns.flatMap((c, i) =>
     c.primaryKeyPosition > 0 ? [i] : [],
@@ -26,11 +35,15 @@ export function editableRow(
     row.length === details.columns.length &&
     details.columns.every(
       (c, i) =>
-        c.name === result.columns[i]?.name &&
-        !/^(json|jsonb)$/i.test(c.dataType),
+        c.name === result.columns[i]?.name && (!jsonColumn(c) || postgres),
     ) &&
     keys.every((i) => row[i] !== null) &&
-    row.every((v) => v === null || typeof v !== "object")
+    row.every(
+      (v, i) =>
+        v === null ||
+        typeof v !== "object" ||
+        (postgres && jsonColumn(details.columns[i])),
+    )
   );
 }
 export function parseCell(
@@ -41,6 +54,18 @@ export function parseCell(
   if (isNull) {
     if (!column.nullable) throw Error("This column does not allow NULL.");
     return null;
+  }
+  if (jsonColumn(column)) {
+    try {
+      JSON.parse(text);
+    } catch {
+      throw Error("Enter valid JSON.");
+    }
+    return text;
+  }
+  if (column.enumValues.length) {
+    if (!column.enumValues.includes(text)) throw Error("Choose an enum value.");
+    return text;
   }
   if (/^(bool|boolean)$/i.test(column.dataType)) {
     if (!["true", "false", "1", "0"].includes(text))

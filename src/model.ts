@@ -42,6 +42,14 @@ export interface Connected {
   tables: Table[];
   schemas?: string[];
 }
+export interface PreviewOptions {
+  filter?: {
+    column: string;
+    operator: "equals" | "is-null" | "not-null";
+    value: string;
+  };
+  sort?: { column: string; direction: "ASC" | "DESC"; tieBreakers: string[] };
+}
 export interface QueryTab {
   savedScriptId?: string;
   id: string;
@@ -50,6 +58,7 @@ export interface QueryTab {
   sql: string;
   table?: Table;
   tableView?: TableView;
+  previewOptions?: PreviewOptions;
   overview?: boolean;
   overviewSchema?: string;
   page: number;
@@ -59,8 +68,49 @@ export interface QueryTab {
 }
 export const PAGE_SIZE = 200;
 export const quoteIdentifier = (s: string) => `"${s.replaceAll('"', '""')}"`;
-export function tableSql(table: Table, page = 0) {
-  return `SELECT *\nFROM ${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}\nLIMIT ${PAGE_SIZE + 1} OFFSET ${Math.max(0, page) * PAGE_SIZE};`;
+export function tableSql(
+  table: Table,
+  page = 0,
+  options?: PreviewOptions,
+  driver: Driver = "sqlite",
+) {
+  const lines = [
+    "SELECT *",
+    `FROM ${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}`,
+  ];
+  const filter = options?.filter;
+  if (filter) {
+    const column = quoteIdentifier(filter.column);
+    if (filter.operator === "equals") {
+      if (filter.value.includes("\0"))
+        throw Error("Filter values cannot contain a NUL character.");
+      let literal = `'${filter.value.replaceAll("'", "''")}'`;
+      if (driver === "postgres") {
+        let delimiter = "$dum_e$";
+        while (filter.value.includes(delimiter))
+          delimiter = delimiter.replace("$d", "$dd");
+        literal = `${delimiter}${filter.value}${delimiter}`;
+      }
+      lines.push(`WHERE ${column} = ${literal}`);
+    } else {
+      lines.push(
+        `WHERE ${column} IS ${filter.operator === "not-null" ? "NOT " : ""}NULL`,
+      );
+    }
+  }
+  const sort = options?.sort;
+  if (sort) {
+    const direction = sort.direction === "DESC" ? "DESC" : "ASC";
+    const order = [
+      `${quoteIdentifier(sort.column)} ${direction}`,
+      ...sort.tieBreakers
+        .filter((name) => name !== sort.column)
+        .map(quoteIdentifier),
+    ];
+    lines.push(`ORDER BY ${order.join(", ")}`);
+  }
+  lines.push(`LIMIT ${PAGE_SIZE + 1} OFFSET ${Math.max(0, page) * PAGE_SIZE};`);
+  return lines.join("\n");
 }
 export function cellText(value: Cell): string {
   return value === null

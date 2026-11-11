@@ -747,6 +747,35 @@ p {
   overflow: auto;
   max-height: 55vh;
 }
+.query-pane.is-collapsed {
+  height: auto !important;
+  min-height: 0;
+  resize: none;
+  overflow: visible;
+}
+.query-pane.is-collapsed > .sql-editor,
+.query-pane.is-collapsed > .editor-foot {
+  display: none;
+}
+.editor-collapse-button {
+  gap: 8px;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.editor-collapse-button svg {
+  color: var(--muted);
+}
+.editor-collapse-button:hover,
+.editor-collapse-button:focus-visible {
+  color: var(--text);
+  background: var(--hover);
+}
 .editor-toolbar {
   display: flex;
   justify-content: space-between;
@@ -759,14 +788,6 @@ p {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-.editor-label {
-  font-size: 8px;
-  letter-spacing: 1.25px;
-  color: var(--muted);
-  display: flex;
-  align-items: center;
-  gap: 7px;
 }
 .toolbar-divider {
   height: 14px;
@@ -1659,6 +1680,8 @@ p {
   box-shadow: var(--shadow);
 }
 .connection-menu-panel button {
+  justify-content: flex-start;
+
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1724,4 +1747,45 @@ p {
 }
 .remove-connection-dialog .dialog-title-icon {
   color: var(--red);
+}
+
+.grid-column-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.column-filter-dialog {
+  width: 380px;
+}
+.column-filter-dialog header {
+  padding: 16px 20px;
+}
+.column-filter-dialog header code {
+  color: var(--muted);
+  font-size: 11px;
+}
+.column-filter-fields {
+  display: grid;
+  gap: 12px;
+  padding: 0 20px 18px;
+}
+.column-filter-fields label {
+  display: grid;
+  gap: 5px;
+  color: var(--secondary);
+  font-size: 12px;
+}
+.column-filter-fields input,
+.column-filter-fields select {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--editor);
+  color: var(--text);
+}
+.column-filter-dialog footer {
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
 }

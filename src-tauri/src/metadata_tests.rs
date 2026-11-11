@@ -180,6 +180,17 @@ async fn postgres_real_metadata() {
     .unwrap();
     assert_eq!(details.columns[0].identity.as_deref(), Some("ALWAYS"));
     assert!(!details.columns[0].nullable);
+    let mut connection = db::postgres(&profile, "dum-e-local-test-only")
+        .await
+        .unwrap();
+    let row = sqlx::query(
+        "SELECT 'queued'::catalog_test.workflow_status AS status, NULL::catalog_test.workflow_status AS empty",
+    )
+    .fetch_one(&mut connection)
+    .await
+    .unwrap();
+    assert_eq!(db::pg_cell(&row, 0).unwrap(), serde_json::json!("queued"));
+    assert_eq!(db::pg_cell(&row, 1).unwrap(), serde_json::Value::Null);
     let status = details.columns.iter().find(|c| c.name == "status").unwrap();
     assert_eq!(status.enum_values, vec!["queued", "done"]);
     assert_eq!(status.type_detail.as_deref(), Some("Enum"));

@@ -45,3 +45,29 @@ test("current-page filters and sorts keep exact original row references and inte
   );
   assert.equal(filteredRows(result, "quoted", null)[0].index, 2);
 });
+
+test("table preview applies quoted filters and sorting before pagination", () => {
+  const table = { schema: "shop_demo", name: "orders", kind: "table" };
+  const sql = tableSql(table, 1, {
+    filter: { column: 'state"name', operator: "equals", value: "O'Reilly" },
+    sort: { column: "amount", direction: "DESC", tieBreakers: ["id"] },
+  });
+  assert.match(
+    sql,
+    /WHERE "state""name" = 'O''Reilly'\nORDER BY "amount" DESC, "id"\nLIMIT 201 OFFSET 200;/,
+  );
+  assert.match(
+    tableSql(table, 0, {
+      filter: { column: "state", operator: "not-null", value: "" },
+    }),
+    /WHERE "state" IS NOT NULL/,
+  );
+  assert.ok(
+    tableSql(
+      table,
+      0,
+      { filter: { column: "state", operator: "equals", value: "$dum_e$" } },
+      "postgres",
+    ).includes("$ddum_e$$dum_e$$ddum_e$"),
+  );
+});

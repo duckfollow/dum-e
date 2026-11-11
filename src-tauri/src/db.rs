@@ -166,6 +166,15 @@ pub(crate) fn pg_cell(row: &sqlx::postgres::PgRow, index: usize) -> Result<Value
     if raw.is_null() {
         return Ok(Value::Null);
     }
+    use sqlx::postgres::PgTypeKind;
+    let type_info = raw.type_info();
+    let mut base = type_info.as_ref();
+    while let PgTypeKind::Domain(inner) = base.kind() {
+        base = inner;
+    }
+    if matches!(base.kind(), PgTypeKind::Enum(_)) {
+        return value_limit(json!(raw.as_str().map_err(|e| e.to_string())?));
+    }
     macro_rules! get {
         ($t:ty) => {
             row.try_get::<$t, _>(index).map_err(|e| e.to_string())?

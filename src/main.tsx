@@ -29,6 +29,8 @@ import {
   Plus,
   Search,
   ChevronRight,
+  ChevronUp,
+  ChevronDown,
   Table2,
   FileCode2,
   X,
@@ -78,6 +80,7 @@ import {
   type Profile,
   type Connected,
   type QueryTab,
+  type PreviewOptions,
   type QueryResult,
   type ExecutionResult,
   type Table,
@@ -139,6 +142,7 @@ function DriverMark({
 const emptySql =
   "-- A little help with your data.\n-- Run your query with ⌘ Enter.\n\nSELECT 1 AS hello;";
 function App() {
+  const [editorCollapsed, setEditorCollapsed] = useState(false);
   const [savedState, setSavedState] = useState<{
     scripts: SavedScript[];
     error: string;
@@ -272,6 +276,7 @@ function App() {
     page = tab.page,
     selectionOnly = false,
     automatic = false,
+    previewOptions = tab.previewOptions,
   ) {
     if (editingRef.current) {
       if (!automatic) guardEdits();
@@ -356,6 +361,7 @@ function App() {
           patch(tab.id, {
             result: reconciledResult(tab.result, result),
             page,
+            previewOptions,
             sql: selectionOnly ? tab.sql : sqlText,
             error: undefined,
           });
@@ -594,6 +600,18 @@ function App() {
           .toLowerCase()
           .includes(tableSearch.toLowerCase()),
       ) || [];
+  function applyPreviewOptions(options: PreviewOptions) {
+    if (!active?.table || !profile || busyRef.current || guardEdits()) return;
+    try {
+      const sql = tableSql(active.table, 0, options, profile.driver);
+      setFilter("");
+      setSort(null);
+      setSelectedRow(null);
+      void execute(active, sql, 0, false, false, options);
+    } catch (error) {
+      setToast(String(error));
+    }
+  }
   async function exportData(format: "csv" | "json") {
     if (!result) return;
     try {
@@ -1009,7 +1027,8 @@ function App() {
             </div>
             {active.overview ? (
               <DatabaseRelations
-                key={`${active.id}-${catalogRevision}`}
+                key={active.id}
+                catalogRevision={catalogRevision}
                 connectionId={active.profileId}
                 connected={!!profile}
                 scope={active.overviewSchema}
@@ -1041,12 +1060,36 @@ function App() {
                     active.tableView !== "data"
                   }
                 >
-                  <div className="query-pane">
+                  <div
+                    className={`query-pane${editorCollapsed ? " is-collapsed" : ""}`}
+                  >
                     <div className="editor-toolbar">
                       <div>
-                        <span className="editor-label">
-                          <Terminal size={13} /> SQL EDITOR
-                        </span>
+                        <button
+                          type="button"
+                          className="editor-collapse-button"
+                          aria-expanded={!editorCollapsed}
+                          aria-label={
+                            editorCollapsed
+                              ? "Expand SQL editor"
+                              : "Collapse SQL editor"
+                          }
+                          title={
+                            editorCollapsed
+                              ? "Expand SQL editor"
+                              : "Collapse SQL editor"
+                          }
+                          onClick={() =>
+                            setEditorCollapsed((collapsed) => !collapsed)
+                          }
+                        >
+                          SQL Editor
+                          {editorCollapsed ? (
+                            <ChevronDown size={14} aria-hidden="true" />
+                          ) : (
+                            <ChevronUp size={14} aria-hidden="true" />
+                          )}
+                        </button>
                         <span className="toolbar-divider" />
                         <span className="dialect">
                           {dialectProfile?.driver === "postgres"
@@ -1399,7 +1442,13 @@ function App() {
                     ) : (
                       <>
                         {active.table &&
-                        active.sql === tableSql(active.table, active.page) ? (
+                        active.sql ===
+                          tableSql(
+                            active.table,
+                            active.page,
+                            active.previewOptions,
+                            profile?.driver,
+                          ) ? (
                           <EditableGrid
                             key={active.id}
                             cache={tableDetailsCache}
@@ -1407,12 +1456,31 @@ function App() {
                             rows={rows}
                             sort={sort}
                             onSort={setSort}
+                            onTableSort={(column, direction) => {
+                              const details = tableDetailsCache.peek(
+                                active.profileId,
+                                active.table!,
+                              );
+                              const tieBreakers = (details?.columns ?? [])
+                                .filter((entry) => entry.primaryKeyPosition > 0)
+                                .sort(
+                                  (a, b) =>
+                                    a.primaryKeyPosition - b.primaryKeyPosition,
+                                )
+                                .map((entry) => entry.name);
+                              applyPreviewOptions({
+                                ...active.previewOptions,
+                                sort: { column, direction, tieBreakers },
+                              });
+                            }}
+                            onPreviewOptions={applyPreviewOptions}
                             selectedRow={selectedRow}
                             onRow={(index, inspect) => {
                               setSelectedRow(index);
                               if (inspect) setInspector(true);
                             }}
                             connected={!!profile}
+                            postgres={profile?.driver === "postgres"}
                             onOpenJson={setJsonViewer}
                             busy={!!busy}
                             onEditing={updateEditing}
@@ -1628,7 +1696,12 @@ function App() {
                             onClick={() =>
                               void execute(
                                 active,
-                                tableSql(active.table!, active.page - 1),
+                                tableSql(
+                                  active.table!,
+                                  active.page - 1,
+                                  active.previewOptions,
+                                  profile?.driver,
+                                ),
                                 active.page - 1,
                               )
                             }
@@ -1643,7 +1716,12 @@ function App() {
                             onClick={() =>
                               void execute(
                                 active,
-                                tableSql(active.table!, active.page + 1),
+                                tableSql(
+                                  active.table!,
+                                  active.page + 1,
+                                  active.previewOptions,
+                                  profile?.driver,
+                                ),
                                 active.page + 1,
                               )
                             }

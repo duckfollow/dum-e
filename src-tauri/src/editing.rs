@@ -64,7 +64,11 @@ pub fn editable_type(t: &str) -> bool {
     .iter()
     .any(|base| t == *base || t.starts_with(&format!("{base}(")))
 }
-fn validate(details: &TableDetails, edits: &[RowEdit]) -> Result<Vec<usize>, String> {
+fn validate(
+    details: &TableDetails,
+    edits: &[RowEdit],
+    postgres: bool,
+) -> Result<Vec<usize>, String> {
     if details.table.kind != "table" {
         return Err("Only ordinary tables can be edited.".into());
     }
@@ -82,14 +86,14 @@ fn validate(details: &TableDetails, edits: &[RowEdit]) -> Result<Vec<usize>, Str
         if edit.operation != EditOperation::Insert {
             if edit.original.len() != details.columns.len()
                 || edit.original.iter().any(|v| !scalar(v))
-                || details
-                    .columns
-                    .iter()
-                    .any(|c| matches!(c.data_type.as_str(), "json" | "jsonb"))
+                || (!postgres
+                    && details
+                        .columns
+                        .iter()
+                        .any(|c| matches!(c.data_type.as_str(), "json" | "jsonb")))
             {
                 return Err(
-                    "Reload this table. Rows containing JSON or binary previews are read-only."
-                        .into(),
+                    "Reload this table. Rows containing unsupported previews are read-only.".into(),
                 );
             }
             let key: Vec<_> = keys.iter().map(|i| &edit.original[*i]).collect();
@@ -113,9 +117,11 @@ fn validate(details: &TableDetails, edits: &[RowEdit]) -> Result<Vec<usize>, Str
                 .iter()
                 .find(|c| c.name == *name)
                 .ok_or("Unknown column. Reload the table.")?;
+            let is_json = postgres && matches!(c.data_type.as_str(), "json" | "jsonb");
+            let is_enum = !c.enum_values.is_empty();
             if c.generated.is_some()
                 || c.identity.is_some()
-                || !editable_type(&c.data_type)
+                || (!is_json && !is_enum && !editable_type(&c.data_type))
                 || !scalar(value)
                 || (value.is_null() && !c.nullable)
             {
@@ -123,10 +129,22 @@ fn validate(details: &TableDetails, edits: &[RowEdit]) -> Result<Vec<usize>, Str
                     "Column '{name}' is read-only or the value is invalid."
                 ));
             }
-            if [
-                "integer", "int", "smallint", "bigint", "int2", "int4", "int8",
-            ]
-            .contains(&c.data_type.to_lowercase().as_str())
+            if is_json && !value.is_null() && !value.is_string() {
+                return Err(format!("Enter JSON text for '{name}'."));
+            }
+            if is_enum
+                && !value.is_null()
+                && !value
+                    .as_str()
+                    .is_some_and(|label| c.enum_values.iter().any(|v| v == label))
+            {
+                return Err(format!("Choose an enum value for '{name}'."));
+            }
+            if !is_enum
+                && [
+                    "integer", "int", "smallint", "bigint", "int2", "int4", "int8",
+                ]
+                .contains(&c.data_type.to_lowercase().as_str())
                 && !value.is_null()
             {
                 let text = value
@@ -143,6 +161,21 @@ fn validate(details: &TableDetails, edits: &[RowEdit]) -> Result<Vec<usize>, Str
     }
     Ok(keys)
 }
+fn pg_edit_value(details: &TableDetails, column: &str) -> String {
+    let name = db::quoted(column);
+    // Extract the original JSON text from its wrapper string before casting.
+    match details
+        .columns
+        .iter()
+        .find(|c| c.name == column)
+        .map(|c| c.data_type.as_str())
+    {
+        Some("json") => format!("(v.{name} #>> '{{}}')::json"),
+        Some("jsonb") => format!("(v.{name} #>> '{{}}')::jsonb"),
+        _ => format!("v.{name}"),
+    }
+}
+
 fn json_row(details: &TableDetails, values: &[Value]) -> Value {
     Value::Object(
         details
@@ -196,7 +229,7 @@ pub async fn apply(
             .map_err(err)?;
         let mut tx = c.begin_with("BEGIN IMMEDIATE").await.map_err(err)?;
         let details = metadata::inspect(profile, password, table).await?;
-        let keys = validate(&details, edits)?;
+        let keys = validate(&details, edits, false)?;
         // Reject virtual tables, whose update modules can have external effects.
         if details
             .definition
@@ -298,7 +331,7 @@ pub async fn apply(
             .await
             .map_err(err)?;
         let details = metadata::inspect(profile, password, table).await?;
-        let keys = validate(&details, edits)?;
+        let keys = validate(&details, edits, true)?;
         let predicate = keys
             .iter()
             .map(|i| {
@@ -320,8 +353,12 @@ pub async fn apply(
             if rows.len() != 1 {
                 return Err(CONFLICT.into());
             }
+            let raw_json = db::pg_json_raw(&rows[0])?;
             let current = (0..rows[0].len())
-                .map(|i| db::pg_cell(&rows[0], i))
+                .map(|i| match raw_json.get(&i) {
+                    Some(raw) => Ok(Value::String(raw.clone())),
+                    None => db::pg_cell(&rows[0], i),
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             if current != edit.original {
                 return Err(CONFLICT.into());
@@ -343,10 +380,7 @@ pub async fn apply(
             let set = edit
                 .changes
                 .keys()
-                .map(|n| {
-                    let n = db::quoted(n);
-                    format!("{n}=v.{n}")
-                })
+                .map(|n| format!("{}={}", db::quoted(n), pg_edit_value(&details, n)))
                 .collect::<Vec<_>>()
                 .join(", ");
             let sql = format!("UPDATE {target} t SET {set} FROM jsonb_populate_record(NULL::{target}, $1::jsonb) o, jsonb_populate_record(NULL::{target}, $2::jsonb) v WHERE {predicate}");
@@ -387,7 +421,7 @@ pub async fn apply(
                 let selected = edit
                     .changes
                     .keys()
-                    .map(|n| format!("v.{}", db::quoted(n)))
+                    .map(|n| pg_edit_value(&details, n))
                     .collect::<Vec<_>>()
                     .join(",");
                 let sql=format!("INSERT INTO {target} ({names}) SELECT {selected} FROM jsonb_populate_record(NULL::{target}, $1::jsonb) v");
@@ -770,21 +804,80 @@ mod tests {
         exercise(&p, "dum-e-local-test-only", &schema).await;
         exercise_crud(&p, "dum-e-local-test-only", &schema).await;
         sql(&p,"dum-e-local-test-only",&format!("CREATE TABLE {}.json_items(id INTEGER PRIMARY KEY, name TEXT, payload JSONB); INSERT INTO {}.json_items VALUES (1,'before','null');",db::quoted(&schema),db::quoted(&schema))).await;
+        let enum_table = Table {
+            schema: schema.clone(),
+            name: "enum_items".into(),
+            kind: "table".into(),
+        };
+        let namespace = db::quoted(&schema);
+        sql(
+            &p,
+            "dum-e-local-test-only",
+            &format!(
+                "CREATE TYPE {namespace}.item_status AS ENUM ('pending', 'paid', '');                  CREATE TABLE {namespace}.enum_items(id INTEGER PRIMARY KEY, status {namespace}.item_status);                  INSERT INTO {namespace}.enum_items VALUES (1, 'pending');"
+            ),
+        )
+        .await;
+        let before = rows(&p, "dum-e-local-test-only", &enum_table).await;
+        assert!(apply(
+            &p,
+            "dum-e-local-test-only",
+            &enum_table,
+            &[edit(&before[0], json!({"status":"invalid"}))],
+        )
+        .await
+        .is_err());
+        assert_eq!(
+            apply(
+                &p,
+                "dum-e-local-test-only",
+                &enum_table,
+                &[edit(&before[0], json!({"status":"paid"}))],
+            )
+            .await
+            .unwrap(),
+            1
+        );
+        let after = rows(&p, "dum-e-local-test-only", &enum_table).await;
+        assert_eq!(after[0][1], json!("paid"));
         let json_table = Table {
             schema: schema.clone(),
             name: "json_items".into(),
             kind: "table".into(),
         };
-        let before = rows(&p, "dum-e-local-test-only", &json_table).await;
+        let mut before = rows(&p, "dum-e-local-test-only", &json_table).await;
+        // The grid snapshots the raw JSON text, preserving JSON null vs SQL NULL.
+        before[0][2] = json!("null");
+        let raw = r#"{"large":9007199254740993}"#;
+        assert_eq!(
+            apply(
+                &p,
+                "dum-e-local-test-only",
+                &json_table,
+                &[edit(&before[0], json!({"payload":raw}))],
+            )
+            .await
+            .unwrap(),
+            1
+        );
+        let mut connection = db::postgres(&p, "dum-e-local-test-only").await.unwrap();
+        let row = sqlx::query(&format!("SELECT payload FROM {namespace}.json_items"))
+            .fetch_one(&mut connection)
+            .await
+            .unwrap();
+        assert_eq!(
+            db::pg_json_raw(&row).unwrap()[&0],
+            r#"{"large": 9007199254740993}"#
+        );
         assert!(apply(
             &p,
             "dum-e-local-test-only",
             &json_table,
-            &[edit(&before[0], json!({"name":"after"}))]
+            &[edit(&before[0], json!({"payload":null}))],
         )
         .await
         .unwrap_err()
-        .contains("JSON"));
+        .contains("row changed"));
 
         sql(
             &p,

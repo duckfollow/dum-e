@@ -6,6 +6,10 @@ import {
   AlertCircle,
   Search,
   ArrowUpRight,
+  ArrowRight,
+  Database,
+  KeyRound,
+  Table2,
 } from "lucide-react";
 import { api } from "./api";
 import type { Table } from "./model";
@@ -20,11 +24,13 @@ import "./database-relations.css";
 export function DatabaseRelations({
   connectionId,
   connected,
+  catalogRevision,
   scope = "",
   onOpen,
 }: {
   connectionId: string;
   connected: boolean;
+  catalogRevision: number;
   scope?: string;
   onOpen: (t: Table) => void;
 }) {
@@ -48,15 +54,21 @@ export function DatabaseRelations({
     let disposed = false;
     setLoading(true);
     setError("");
-    setData(null);
     if (!connected) {
+      setData(null);
       setLoading(false);
       setError("Reconnect to this database to view its relationships.");
       return;
     }
     void api<DatabaseRelationsData>("database_relations", { id: connectionId })
       .then((value) => {
-        if (!disposed) setData(value);
+        if (!disposed) {
+          setData((previous) =>
+            JSON.stringify(previous) === JSON.stringify(value)
+              ? previous
+              : value,
+          );
+        }
       })
       .catch((e) => {
         if (!disposed) setError(String(e));
@@ -67,7 +79,7 @@ export function DatabaseRelations({
     return () => {
       disposed = true;
     };
-  }, [connectionId, connected, revision]);
+  }, [connectionId, connected, catalogRevision, revision]);
   useEffect(() => {
     setPage(0);
     setObjectPage(0);
@@ -107,26 +119,46 @@ export function DatabaseRelations({
       aria-label="Database relations overview"
     >
       <header>
-        <div>
-          <h1>
-            <GitFork size={23} /> Database Relations
-          </h1>
-          <p>Tables, views, and the foreign keys that connect them.</p>
+        <div className="overview-title">
+          <span className="overview-title-icon">
+            <GitFork size={22} aria-hidden="true" />
+          </span>
+          <div>
+            <h1>Database Relations</h1>
+            {data && (
+              <div className="overview-stats">
+                <span>
+                  <Table2 size={13} aria-hidden="true" /> {data.tables.length}{" "}
+                  objects
+                </span>
+                <span>
+                  <KeyRound size={13} aria-hidden="true" />{" "}
+                  {data.relations.length} foreign keys
+                </span>
+                <span>
+                  <Database size={13} aria-hidden="true" />{" "}
+                  {new Set(data.tables.map((t) => t.schema)).size} schemas
+                </span>
+              </div>
+            )}
+          </div>
         </div>
         <button
           className="secondary"
           disabled={loading || !connected}
+          aria-busy={loading}
           onClick={() => setRevision((r) => r + 1)}
         >
-          <RefreshCw size={14} /> Refresh relations
+          <RefreshCw size={14} className={loading ? "spin" : undefined} />{" "}
+          Refresh relations
         </button>
       </header>
-      {loading ? (
+      {loading && !data ? (
         <div className="result-empty">
           <LoaderCircle className="spin" size={28} />
           <h3>Reading database relationships…</h3>
         </div>
-      ) : error ? (
+      ) : error && !data ? (
         <div className="query-error" role="alert">
           <AlertCircle size={24} />
           <h3>Could not load relationships.</h3>
@@ -142,14 +174,11 @@ export function DatabaseRelations({
       ) : (
         data && (
           <>
-            <div className="overview-stats">
-              <b>{data.tables.length} objects</b>
-              <b>{data.relations.length} foreign keys</b>
-              <span>
-                {new Set(data.tables.map((t) => t.schema)).size} schemas with
-                objects · snapshot
-              </span>
-            </div>
+            {error && (
+              <p className="overview-note" role="alert">
+                Refresh failed. Showing the previous relationships. {error}
+              </p>
+            )}
             <div className="overview-filters">
               <label>
                 Schema
@@ -189,6 +218,7 @@ export function DatabaseRelations({
                 Connected only
               </label>
               <button
+                disabled={!schema && !search && !onlyConnected}
                 className="text-button"
                 onClick={() => {
                   setSearch("");
@@ -220,25 +250,36 @@ export function DatabaseRelations({
               >
                 {(
                   [
-                    ["diagram", "Diagram", graph.nodes.length],
-                    ["keys", "Foreign keys", filtered.relations.length],
-                    ["objects", "Objects", filtered.tables.length],
+                    ["diagram", "Diagram", graph.nodes.length, GitFork],
+                    [
+                      "keys",
+                      "Foreign keys",
+                      filtered.relations.length,
+                      KeyRound,
+                    ],
+                    ["objects", "Objects", filtered.tables.length, Table2],
                   ] as const
-                ).map(([id, label, count]) => (
+                ).map(([id, label, count, Icon]) => (
                   <button
                     key={id}
                     id={`${panelId}-${id}`}
                     role="tab"
                     aria-selected={display === id}
+                    tabIndex={display === id ? 0 : -1}
                     aria-controls={`${panelId}-panel`}
                     onClick={() => setDisplay(id)}
                   >
+                    <Icon size={14} aria-hidden="true" />
                     {label}
                     <small>{count}</small>
                   </button>
                 ))}
               </div>
-              <span>Arrows point to the referenced table</span>
+              {display === "diagram" && (
+                <span className="overview-legend">
+                  <ArrowRight size={14} aria-hidden="true" /> References
+                </span>
+              )}
             </nav>
             {(schema || search) && (
               <p className="overview-note">
@@ -271,11 +312,6 @@ export function DatabaseRelations({
               {display === "keys" && (
                 <section className="overview-list">
                   <h2>Foreign keys · {filtered.relations.length}</h2>
-                  <p>
-                    Each row is one declared constraint; compound column pairs
-                    stay together. No relationship is inferred from column
-                    names.
-                  </p>
                   <div className="overview-table">
                     <table>
                       <thead>
@@ -335,10 +371,6 @@ export function DatabaseRelations({
               {display === "objects" && (
                 <section className="overview-list">
                   <h2>Objects · {filtered.tables.length}</h2>
-                  <p>
-                    The list covers all matching objects, including those beyond
-                    the graph display limit.
-                  </p>
                   <div className="overview-objects">
                     {filtered.tables
                       .slice(objectPage * 100, (objectPage + 1) * 100)
