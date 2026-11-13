@@ -118,16 +118,20 @@ fn validate(
                 .find(|c| c.name == *name)
                 .ok_or("Unknown column. Reload the table.")?;
             let is_json = postgres && matches!(c.data_type.as_str(), "json" | "jsonb");
+            let is_array = postgres && c.data_type.ends_with("[]");
             let is_enum = !c.enum_values.is_empty();
             if c.generated.is_some()
                 || c.identity.is_some()
-                || (!is_json && !is_enum && !editable_type(&c.data_type))
+                || (!is_json && !is_enum && !is_array && !editable_type(&c.data_type))
                 || !scalar(value)
                 || (value.is_null() && !c.nullable)
             {
                 return Err(format!(
                     "Column '{name}' is read-only or the value is invalid."
                 ));
+            }
+            if is_array && !value.is_null() && !value.is_string() {
+                return Err(format!("Enter a PostgreSQL array literal for '{name}'."));
             }
             if is_json && !value.is_null() && !value.is_string() {
                 return Err(format!("Enter JSON text for '{name}'."));
@@ -176,13 +180,10 @@ fn pg_edit_value(details: &TableDetails, column: &str) -> String {
     }
 }
 
-fn json_row(details: &TableDetails, values: &[Value]) -> Value {
+fn json_key(details: &TableDetails, keys: &[usize], values: &[Value]) -> Value {
     Value::Object(
-        details
-            .columns
-            .iter()
-            .zip(values)
-            .map(|(c, v)| (c.name.clone(), v.clone()))
+        keys.iter()
+            .map(|&i| (details.columns[i].name.clone(), values[i].clone()))
             .collect(),
     )
 }
@@ -340,13 +341,27 @@ pub async fn apply(
             })
             .collect::<Vec<_>>()
             .join(" AND ");
-        let select = format!("SELECT t.* FROM {target} t, jsonb_populate_record(NULL::{target}, $1::jsonb) o WHERE {predicate} FOR UPDATE OF t");
+        // Compare the same PostgreSQL array text that the grid originally received.
+        let projection = details
+            .columns
+            .iter()
+            .map(|column| {
+                let name = db::quoted(&column.name);
+                if column.data_type.ends_with("[]") {
+                    format!("t.{name}::pg_catalog.text AS {name}")
+                } else {
+                    format!("t.{name}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let select = format!("SELECT {projection} FROM {target} t, jsonb_populate_record(NULL::{target}, $1::jsonb) o WHERE {predicate} FOR UPDATE OF t");
         for edit in edits
             .iter()
             .filter(|e| e.operation != EditOperation::Insert)
         {
             let rows = sqlx::query(&select)
-                .bind(json_row(&details, &edit.original))
+                .bind(json_key(&details, &keys, &edit.original))
                 .fetch_all(&mut *tx)
                 .await
                 .map_err(err)?;
@@ -366,7 +381,7 @@ pub async fn apply(
             if edit.operation == EditOperation::Delete {
                 let sql=format!("DELETE FROM {target} t USING jsonb_populate_record(NULL::{target}, $1::jsonb) o WHERE {predicate}");
                 if sqlx::query(&sql)
-                    .bind(json_row(&details, &edit.original))
+                    .bind(json_key(&details, &keys, &edit.original))
                     .execute(&mut *tx)
                     .await
                     .map_err(err)?
@@ -386,7 +401,7 @@ pub async fn apply(
             let sql = format!("UPDATE {target} t SET {set} FROM jsonb_populate_record(NULL::{target}, $1::jsonb) o, jsonb_populate_record(NULL::{target}, $2::jsonb) v WHERE {predicate}");
             let values = Value::Object(edit.changes.clone().into_iter().collect());
             if sqlx::query(&sql)
-                .bind(json_row(&details, &edit.original))
+                .bind(json_key(&details, &keys, &edit.original))
                 .bind(values)
                 .execute(&mut *tx)
                 .await
@@ -804,6 +819,47 @@ mod tests {
         exercise(&p, "dum-e-local-test-only", &schema).await;
         exercise_crud(&p, "dum-e-local-test-only", &schema).await;
         sql(&p,"dum-e-local-test-only",&format!("CREATE TABLE {}.json_items(id INTEGER PRIMARY KEY, name TEXT, payload JSONB); INSERT INTO {}.json_items VALUES (1,'before','null');",db::quoted(&schema),db::quoted(&schema))).await;
+        let array_table = Table {
+            schema: schema.clone(),
+            name: "array_items".into(),
+            kind: "table".into(),
+        };
+        let target = format!("{}.array_items", db::quoted(&schema));
+        let password = "dum-e-local-test-only";
+        sql(&p, password, &format!(
+            "CREATE TABLE {target}(id integer PRIMARY KEY, tags text[], doses integer[][]); INSERT INTO {target} VALUES (1, ARRAY['before'], NULL);"
+        )).await;
+        let original = vec![json!("1"), json!("{before}"), Value::Null];
+        let tags = r#"{"with,comma","NULL",NULL}"#;
+        let changes = edit(&original, json!({"tags":tags,"doses":"{{1,NULL},{3,4}}"}));
+        assert_eq!(
+            apply(&p, password, &array_table, &[changes]).await.unwrap(),
+            1
+        );
+        assert!(matches!(
+            apply(&p, password, &array_table, &[edit(&original, json!({"tags":"{}"}))]).await,
+            Err(error) if error == CONFLICT
+        ));
+        let updated = vec![json!("1"), json!(tags), json!("{{1,NULL},{3,4}}")];
+        assert!(apply(
+            &p,
+            password,
+            &array_table,
+            &[edit(&updated, json!({"doses":"{invalid}"}))]
+        )
+        .await
+        .is_err());
+        assert_eq!(
+            apply(
+                &p,
+                password,
+                &array_table,
+                &[edit(&updated, json!({"tags":"{}","doses":null}))]
+            )
+            .await
+            .unwrap(),
+            1
+        );
         let enum_table = Table {
             schema: schema.clone(),
             name: "enum_items".into(),

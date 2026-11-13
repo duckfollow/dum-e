@@ -76,6 +76,21 @@ test("editing requires exact column shape, complete keys and lossless rows", () 
     ),
     false,
   );
+  assert.equal(
+    editableRow(
+      details,
+      {
+        ...result,
+        columns: [
+          result.columns[0],
+          { ...result.columns[1], previewCast: true },
+        ],
+      },
+      ["1", "{2}"],
+      true,
+    ),
+    false,
+  );
   assert.equal(editableColumn(column({ generated: "stored" })), false);
   assert.equal(editableColumn(column({ dataType: "bytea" })), false);
 });

@@ -359,6 +359,7 @@ async fn run_query(
     id: String,
     request_id: String,
     sql: String,
+    preview: Option<db::Table>,
 ) -> Result<QueryResult, String> {
     uuid::Uuid::parse_str(&request_id).map_err(|_| "Invalid query ID")?;
     let s = session(&state, &id)?;
@@ -375,7 +376,13 @@ async fn run_query(
         id: request_id,
         flag: flag.clone(),
     };
-    let work = db::query(&s.profile, &s.password, &sql, flag.clone());
+    let work = db::run_query(
+        &s.profile,
+        &s.password,
+        &sql,
+        flag.clone(),
+        preview.as_ref(),
+    );
     tokio::pin!(work);
     let mut ticks = tokio::time::interval(Duration::from_millis(50));
     let deadline = tokio::time::sleep(Duration::from_secs(20));

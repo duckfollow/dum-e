@@ -1,3 +1,4 @@
+import { ArrayCell } from "./ArrayCell";
 import { ColumnFilterDialog } from "./PreviewOptions";
 import { createPortal } from "react-dom";
 import type { TableDetailsCache } from "./table-details-cache";
@@ -15,6 +16,7 @@ import {
   ArrowUp,
   Filter,
   Pencil,
+  LockKeyhole,
 } from "lucide-react";
 import { api } from "./api";
 import {
@@ -100,15 +102,21 @@ export function EditableGrid({
   const editorElement = useRef<HTMLDivElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const count = mutationCount(draft);
-  const canEdit =
-    !!connected &&
-    !busy &&
-    !saving &&
-    !failed &&
-    !!details &&
-    details.table.kind === "table" &&
-    details.columns.some((c) => c.primaryKeyPosition > 0) &&
-    details.columns.every((c, i) => source.columns[i]?.name === c.name);
+  let readOnlyReason: string | undefined;
+  if (!connected) readOnlyReason = "Reconnect to edit rows.";
+  else if ((details?.table.kind ?? tab.table?.kind) !== "table")
+    readOnlyReason = "Row editing is available for tables.";
+  else if (details && !details.columns.some((c) => c.primaryKeyPosition > 0))
+    readOnlyReason = "Add a primary key to enable row editing.";
+  else if (
+    details &&
+    !details.columns.every((c, i) => source.columns[i]?.name === c.name)
+  )
+    readOnlyReason = "Reload the table to sync its columns.";
+
+  const canEdit = !!details && !readOnlyReason && !busy && !saving && !failed;
+  const showEditControls =
+    (!readOnlyReason && !!details) || count > 0 || !!editor || saving || failed;
   const pending = count > 0 || !!editor || saving;
   const [columnMenu, setColumnMenu] = useState<{
     column: string;
@@ -551,6 +559,9 @@ export function EditableGrid({
             ) : (
               <input
                 autoFocus
+                placeholder={
+                  c.dataType.endsWith("[]") ? "{value,NULL}" : undefined
+                }
                 aria-label={`${c.name} value`}
                 disabled={editor.mode !== "value"}
                 value={editor.text}
@@ -609,6 +620,10 @@ export function EditableGrid({
                   ? "NULL"
                   : "Required"}
           </span>
+        ) : postgres &&
+          c?.dataType.endsWith("[]") &&
+          typeof display === "string" ? (
+          <ArrayCell value={display} dataType={c.dataType} />
         ) : (
           <>
             <JsonCell
@@ -673,86 +688,102 @@ export function EditableGrid({
         }
       }}
     >
-      <div className="grid-edit-toolbar">
-        <div>
-          <button
-            className="secondary small"
-            disabled={!canEdit || count >= 200}
-            onClick={add}
-          >
-            <Plus size={13} />
-            Add row
-          </button>
-          <button
-            className="text-button"
-            disabled={!canEdit || !selected.size}
-            onClick={remove}
-          >
-            <Trash2 size={13} />
-            Delete{selected.size ? ` (${selected.size})` : ""}
-          </button>
-        </div>
-        <div>
-          <span className="grid-edit-summary">
-            {count
-              ? `${draft.inserted.length} new · ${Object.keys(draft.edits).filter((i) => !draft.deleted.includes(Number(i))).length} edited · ${draft.deleted.length} deleted`
-              : details
-                ? "Double-click a cell to edit · Enter to finish"
-                : "Reading table…"}
-          </span>
-          {failed ? (
+      {!showEditControls ? (
+        <div className="grid-edit-toolbar grid-access-status" role="status">
+          {readOnlyReason ? (
             <>
-              <button
-                className="text-button"
-                disabled={saving || (!count && !editor)}
-                onClick={() => {
-                  setDraft(emptyDraft());
-                  setEditor(null);
-                  setSelected(new Set());
-                  setError(
-                    "Changes discarded. Reload before editing this table again.",
-                  );
-                }}
-              >
-                Discard
-              </button>
-              <button
-                className="secondary small"
-                disabled={saving}
-                onClick={() => void reload()}
-              >
-                Reload
-              </button>
+              <span className="grid-access-label">
+                <LockKeyhole size={13} aria-hidden="true" />
+                Read-only
+              </span>
+              <span>{readOnlyReason}</span>
             </>
           ) : (
-            <>
-              <button
-                className="text-button"
-                disabled={(!count && !editor) || saving}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  setDraft(emptyDraft());
-                  setEditor(null);
-                  setError("");
-                  setSelected(new Set());
-                }}
-              >
-                <X size={13} />
-                Discard
-              </button>
-              <button
-                className="primary small"
-                disabled={(!count && !editor) || saving || busy}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => void save()}
-              >
-                <Check size={13} />
-                {saving ? "Saving…" : `Save${count ? ` (${count})` : ""}`}
-              </button>
-            </>
+            <span>Loading table details…</span>
           )}
         </div>
-      </div>
+      ) : (
+        <div className="grid-edit-toolbar">
+          <div>
+            <button
+              className="secondary small"
+              disabled={!canEdit || count >= 200}
+              onClick={add}
+            >
+              <Plus size={13} />
+              Add row
+            </button>
+            <button
+              className="text-button"
+              disabled={!canEdit || !selected.size}
+              onClick={remove}
+            >
+              <Trash2 size={13} />
+              Delete{selected.size ? ` (${selected.size})` : ""}
+            </button>
+          </div>
+          <div>
+            <span className="grid-edit-summary">
+              {count
+                ? `${draft.inserted.length} new · ${Object.keys(draft.edits).filter((i) => !draft.deleted.includes(Number(i))).length} edited · ${draft.deleted.length} deleted`
+                : details
+                  ? "Double-click a cell to edit · Enter to finish"
+                  : "Reading table…"}
+            </span>
+            {failed ? (
+              <>
+                <button
+                  className="text-button"
+                  disabled={saving || (!count && !editor)}
+                  onClick={() => {
+                    setDraft(emptyDraft());
+                    setEditor(null);
+                    setSelected(new Set());
+                    setError(
+                      "Changes discarded. Reload before editing this table again.",
+                    );
+                  }}
+                >
+                  Discard
+                </button>
+                <button
+                  className="secondary small"
+                  disabled={saving}
+                  onClick={() => void reload()}
+                >
+                  Reload
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  className="text-button"
+                  disabled={(!count && !editor) || saving}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    setDraft(emptyDraft());
+                    setEditor(null);
+                    setError("");
+                    setSelected(new Set());
+                  }}
+                >
+                  <X size={13} />
+                  Discard
+                </button>
+                <button
+                  className="primary small"
+                  disabled={(!count && !editor) || saving || busy}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => void save()}
+                >
+                  <Check size={13} />
+                  {saving ? "Saving…" : `Save${count ? ` (${count})` : ""}`}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {confirmDelete && (
         <div className="grid-delete-confirm" role="alert">
           <span>
@@ -778,26 +809,23 @@ export function EditableGrid({
           {error}
         </div>
       )}
-      {details && !details.columns.some((c) => c.primaryKeyPosition > 0) && (
-        <div className="grid-edit-hint">
-          Read-only: this table needs a primary key to edit rows.
-        </div>
-      )}
       <div className="data-grid-wrap" ref={wrap}>
         <table className="data-grid">
           <thead>
             <tr>
-              <th className="grid-selection">
-                <input
-                  type="checkbox"
-                  aria-label="Select visible rows"
-                  checked={allSelected}
-                  disabled={!canEdit || !rowKeys.length}
-                  onChange={() =>
-                    setSelected(allSelected ? new Set() : new Set(rowKeys))
-                  }
-                />
-              </th>
+              {showEditControls && (
+                <th className="grid-selection">
+                  <input
+                    type="checkbox"
+                    aria-label="Select visible rows"
+                    checked={allSelected}
+                    disabled={!canEdit || !rowKeys.length}
+                    onChange={() =>
+                      setSelected(allSelected ? new Set() : new Set(rowKeys))
+                    }
+                  />
+                </th>
+              )}
               <th className="row-number">#</th>
               {source.columns.map((c, i) => (
                 <th key={i}>
@@ -882,39 +910,41 @@ export function EditableGrid({
                 className={`${draft.deleted.includes(index) ? "grid-row-deleted " : ""}${selectedRow === index ? "selected-row" : ""}`}
                 onClick={() => onRow(index)}
               >
-                <td className="grid-selection">
-                  <input
-                    type="checkbox"
-                    aria-label={`Select row ${index + 1}`}
-                    disabled={
-                      !canEdit ||
-                      !details ||
-                      !editableRow(details, source, values, postgres) ||
-                      draft.deleted.includes(index)
-                    }
-                    checked={selected.has(`row:${index}`)}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={() => toggle(`row:${index}`)}
-                  />
-                  {draft.deleted.includes(index) && (
-                    <button
-                      className="grid-undo"
-                      title="Undo delete"
-                      aria-label={`Undo delete row ${index + 1}`}
-                      disabled={saving}
-                      onClick={() =>
-                        setDraft({
-                          ...draftRef.current,
-                          deleted: draftRef.current.deleted.filter(
-                            (i) => i !== index,
-                          ),
-                        })
+                {showEditControls && (
+                  <td className="grid-selection">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select row ${index + 1}`}
+                      disabled={
+                        !canEdit ||
+                        !details ||
+                        !editableRow(details, source, values, postgres) ||
+                        draft.deleted.includes(index)
                       }
-                    >
-                      <Undo2 size={12} />
-                    </button>
-                  )}
-                </td>
+                      checked={selected.has(`row:${index}`)}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => toggle(`row:${index}`)}
+                    />
+                    {draft.deleted.includes(index) && (
+                      <button
+                        className="grid-undo"
+                        title="Undo delete"
+                        aria-label={`Undo delete row ${index + 1}`}
+                        disabled={saving}
+                        onClick={() =>
+                          setDraft({
+                            ...draftRef.current,
+                            deleted: draftRef.current.deleted.filter(
+                              (i) => i !== index,
+                            ),
+                          })
+                        }
+                      >
+                        <Undo2 size={12} />
+                      </button>
+                    )}
+                  </td>
+                )}
                 <td className="row-number">{tab.page * 200 + index + 1}</td>
                 {values.map((v, i) => cell(index, i, v))}
               </tr>

@@ -79,6 +79,8 @@ impl Profile {
 pub struct Field {
     pub name: String,
     pub data_type: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub preview_cast: bool,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -223,6 +225,19 @@ pub(crate) fn pg_cell(row: &sqlx::postgres::PgRow, index: usize) -> Result<Value
     };
     value_limit(value)
 }
+// SQL scripts use PostgreSQL's simple protocol, which returns server-formatted text.
+pub(crate) fn pg_script_cell(row: &sqlx::postgres::PgRow, index: usize) -> Result<Value, String> {
+    use sqlx::postgres::PgValueFormat;
+
+    let raw = row.try_get_raw(index).map_err(|e| e.to_string())?;
+    if !raw.is_null()
+        && raw.format() == PgValueFormat::Text
+        && pg_preview_needs_cast(raw.type_info().as_ref())
+    {
+        return value_limit(json!(raw.as_str().map_err(|e| e.to_string())?));
+    }
+    pg_cell(row, index)
+}
 pub(crate) fn pg_json_raw(row: &sqlx::postgres::PgRow) -> Result<BTreeMap<usize, String>, String> {
     let mut output = BTreeMap::new();
     for (i, column) in row.columns().iter().enumerate() {
@@ -347,11 +362,56 @@ pub async fn test_connection(profile: &Profile, password: &str) -> Result<(), St
     }
     Ok(())
 }
+#[cfg(test)]
 pub async fn query(
     profile: &Profile,
     password: &str,
     sql: &str,
     cancel: Arc<AtomicBool>,
+) -> Result<QueryResult, String> {
+    run_query(profile, password, sql, cancel, None).await
+}
+
+fn pg_preview_needs_cast(info: &sqlx::postgres::PgTypeInfo) -> bool {
+    use sqlx::postgres::PgTypeKind;
+    let mut base = info;
+    while let PgTypeKind::Domain(inner) = base.kind() {
+        base = inner;
+    }
+    // Keep the native types decoded by pg_cell, including enums and their domains.
+    !matches!(base.kind(), PgTypeKind::Enum(_))
+        && !(matches!(info.kind(), PgTypeKind::Simple | PgTypeKind::Pseudo)
+            && matches!(
+                info.name(),
+                "BOOL"
+                    | "INT2"
+                    | "INT4"
+                    | "INT8"
+                    | "FLOAT4"
+                    | "FLOAT8"
+                    | "NUMERIC"
+                    | "JSON"
+                    | "JSONB"
+                    | "UUID"
+                    | "DATE"
+                    | "TIME"
+                    | "TIMESTAMP"
+                    | "TIMESTAMPTZ"
+                    | "BYTEA"
+                    | "TEXT"
+                    | "VARCHAR"
+                    | "BPCHAR"
+                    | "NAME"
+                    | "UNKNOWN"
+            ))
+}
+
+pub async fn run_query(
+    profile: &Profile,
+    password: &str,
+    sql: &str,
+    cancel: Arc<AtomicBool>,
+    preview: Option<&Table>,
 ) -> Result<QueryResult, String> {
     profile.validate()?;
     validate_sql(sql, profile.driver == "postgres")?;
@@ -372,6 +432,7 @@ pub async fn query(
             .map(|c| Field {
                 name: c.name().into(),
                 data_type: c.type_info().name().into(),
+                preview_cast: false,
             })
             .collect();
         let mut stream = sqlx::query(sql).fetch(&mut c);
@@ -397,17 +458,51 @@ pub async fn query(
         c.execute("BEGIN READ ONLY")
             .await
             .map_err(|e| e.to_string())?;
-        columns = c
-            .describe(sql)
-            .await
-            .map_err(|e| e.to_string())?
+        let description = c.describe(sql).await.map_err(|e| e.to_string())?;
+        let preview_source = preview.and_then(|table| {
+            let name = quoted(&table.name);
+            let prefix = format!("SELECT *\nFROM {}.{name}\n", quoted(&table.schema));
+            sql.starts_with(&prefix)
+                .then(|| (name, &sql["SELECT *".len()..]))
+        });
+        let fields: Vec<_> = description
             .columns()
             .iter()
-            .map(|c| Field {
-                name: c.name().into(),
-                data_type: c.type_info().name().into(),
+            .map(|column| {
+                let preview_cast =
+                    preview_source.is_some() && pg_preview_needs_cast(column.type_info());
+                Field {
+                    name: column.name().into(),
+                    data_type: if preview_cast {
+                        "TEXT"
+                    } else {
+                        column.type_info().name()
+                    }
+                    .into(),
+                    preview_cast,
+                }
             })
             .collect();
+        let mut converted_sql = None;
+        if let Some((table, from)) = preview_source {
+            if fields.iter().any(|field| field.preview_cast) {
+                let projection = fields
+                    .iter()
+                    .map(|field| {
+                        let name = quoted(&field.name);
+                        if field.preview_cast {
+                            format!("{table}.{name}::pg_catalog.text AS {name}")
+                        } else {
+                            format!("{table}.{name}")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                converted_sql = Some(format!("SELECT {projection}{from}"));
+            }
+        }
+        columns = fields;
+        let sql = converted_sql.as_deref().unwrap_or(sql);
         let mut stream = sqlx::query(sql).fetch(&mut c);
         while let Some(row) = stream.try_next().await.map_err(|e| e.to_string())? {
             if cancel.load(Ordering::Relaxed) {
@@ -600,6 +695,74 @@ mod tests {
         assert_eq!(r.rows[0][3], Value::Null);
         assert_eq!(r.rows[0][4], json!({"a":1}));
         assert_eq!(r.rows[0][5], json!("2026-10-24"));
+        let table = Table {
+            schema: "shop_demo".into(),
+            name: "dum_e_preview_types".into(),
+            kind: "table".into(),
+        };
+        let sql = "SELECT *\nFROM \"shop_demo\".\"dum_e_preview_types\"\nWHERE id > 0 ORDER BY dum_e_preview_types.numbers LIMIT 201 OFFSET 0;";
+        let preview = run_query(
+            &p,
+            "dum-e-local-test-only",
+            sql,
+            Arc::new(AtomicBool::new(false)),
+            Some(&table),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            preview.rows,
+            vec![
+                vec![
+                    json!("1"),
+                    json!("{alpha,NULL}"),
+                    json!("{2}"),
+                    json!("1 day"),
+                    json!("10.0.0.1/32"),
+                    json!("ready"),
+                    json!({"a": 1})
+                ],
+                vec![
+                    json!("2"),
+                    json!("{}"),
+                    json!("{10}"),
+                    Value::Null,
+                    Value::Null,
+                    Value::Null,
+                    Value::Null
+                ],
+                vec![
+                    json!("3"),
+                    Value::Null,
+                    Value::Null,
+                    Value::Null,
+                    Value::Null,
+                    Value::Null,
+                    Value::Null
+                ],
+            ]
+        );
+        assert_eq!(preview.columns[1].name, "active_drug_ids");
+        assert_eq!(preview.columns[4].name, "IP\"address");
+        assert_eq!(
+            preview
+                .columns
+                .iter()
+                .map(|field| field.preview_cast)
+                .collect::<Vec<_>>(),
+            [false, true, true, true, true, false, false]
+        );
+        assert_eq!(preview.columns[1].data_type, "TEXT");
+        assert_eq!(preview.columns[6].data_type, "JSONB");
+        assert_eq!(preview.json_raw[&0][&6], r#"{"a": 1}"#);
+        let unconverted = query(
+            &p,
+            "dum-e-local-test-only",
+            sql,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await;
+        assert!(matches!(unconverted, Err(error) if error.contains("active_drug_ids")));
         let fidelity = query(
             &p, "dum-e-local-test-only",
             r#"SELECT 'null'::json, NULL::json, '{"id":9007199254740993,"id":9007199254740994}'::json, '{"exact":1234567890.123456789}'::jsonb"#,

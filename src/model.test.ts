@@ -1,3 +1,4 @@
+import { formatArrayPreview } from "./array-preview.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -70,4 +71,38 @@ test("table preview applies quoted filters and sorting before pagination", () =>
       "postgres",
     ).includes("$ddum_e$$dum_e$$ddum_e$"),
   );
+});
+
+test("PostgreSQL preview sorts by source columns when projections are cast", () => {
+  const table = { schema: "public", name: 'drug"table', kind: "table" };
+  const sql = tableSql(
+    table,
+    0,
+    {
+      sort: {
+        column: "active_drug_ids",
+        direction: "DESC",
+        tieBreakers: ["id"],
+      },
+    },
+    "postgres",
+  );
+  assert.match(
+    sql,
+    /ORDER BY "drug""table"\."active_drug_ids" DESC, "drug""table"\."id"/,
+  );
+});
+
+test("array display distinguishes quoted values, SQL NULL elements and nesting", () => {
+  assert.deepEqual(formatArrayPreview('{"with,comma","NULL",NULL,""}', false), [
+    { kind: "value", text: '"with,comma"' },
+    { kind: "value", text: '"NULL"' },
+    { kind: "null", text: "NULL" },
+    { kind: "value", text: '""' },
+  ]);
+  assert.deepEqual(
+    formatArrayPreview("{{t,NULL},{f,t}}", true)?.map((part) => part.text),
+    ["[", "true", "NULL", "]", "[", "false", "true", "]"],
+  );
+  assert.deepEqual(formatArrayPreview("{}", false), []);
 });

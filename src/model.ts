@@ -20,6 +20,7 @@ export interface Table {
 export interface Field {
   name: string;
   dataType: string;
+  previewCast?: boolean;
 }
 export type Cell =
   null | string | number | boolean | Record<string, unknown> | unknown[];
@@ -101,11 +102,15 @@ export function tableSql(
   const sort = options?.sort;
   if (sort) {
     const direction = sort.direction === "DESC" ? "DESC" : "ASC";
+    const orderColumn = (name: string) =>
+      driver === "postgres"
+        ? `${quoteIdentifier(table.name)}.${quoteIdentifier(name)}`
+        : quoteIdentifier(name);
     const order = [
-      `${quoteIdentifier(sort.column)} ${direction}`,
+      `${orderColumn(sort.column)} ${direction}`,
       ...sort.tieBreakers
         .filter((name) => name !== sort.column)
-        .map(quoteIdentifier),
+        .map(orderColumn),
     ];
     lines.push(`ORDER BY ${order.join(", ")}`);
   }

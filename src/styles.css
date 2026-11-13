@@ -1789,3 +1789,65 @@ p {
   gap: 8px;
   padding: 12px 20px;
 }
+
+.array-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  vertical-align: middle;
+}
+
+.array-preview-item {
+  padding: 0.13em 0.42em;
+  border-radius: 0.35em;
+  background: color-mix(in srgb, currentColor 9%, transparent);
+  white-space: pre;
+}
+
+.array-preview-null,
+.array-preview-bracket {
+  opacity: 0.7;
+}
+
+.workspace-tab-bar {
+  display: flex;
+  flex-shrink: 0;
+  min-width: 0;
+  background: var(--sidebar);
+  border-bottom: 1px solid var(--line);
+}
+.workspace-tab-bar > .tabs {
+  flex: 1;
+  min-width: 0;
+  border-bottom: 0;
+}
+.workspace-tab-actions {
+  position: relative;
+  align-self: center;
+  margin-inline: 6px;
+}
+.workspace-tab-actions summary {
+  display: grid;
+  place-items: center;
+  list-style: none;
+  cursor: pointer;
+}
+.workspace-tab-actions summary::-webkit-details-marker {
+  display: none;
+}
+.workspace-close-tabs {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 4px);
+  right: 0;
+  padding: 8px 12px;
+  white-space: nowrap;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--sidebar);
+  color: var(--text);
+}
+.workspace-close-tabs:hover,
+.workspace-close-tabs:focus-visible {
+  background: var(--hover);
+}

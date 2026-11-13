@@ -119,7 +119,7 @@ pub async fn execute(
                             current.columns = row.columns().iter().enumerate().map(|(i,c)| {
                                 let declared=c.type_info().name();
                                 let data_type=if declared=="NULL" {row.try_get_raw(i).map(|v|v.type_info().name().to_owned()).unwrap_or_else(|_|declared.into())} else {declared.into()};
-                                Field {name:c.name().into(), data_type}
+                                Field {name:c.name().into(), data_type, preview_cast: false}
                             }).collect();
                         }
                         if output.results.len() >= 100 { continue; }
@@ -151,7 +151,7 @@ pub async fn execute(
         consume!(&mut c, db::sqlite_cell, db::sqlite_json_raw);
     } else {
         let mut c = db::postgres_mode(profile, password, true).await?;
-        consume!(&mut c, db::pg_cell, db::pg_json_raw);
+        consume!(&mut c, db::pg_script_cell, db::pg_json_raw);
     }
     if let Some(e) = preview_error {
         let note=format!("SQL execution finished, but part of the result could not be previewed: {e}. Do not rerun writes just to refresh a preview.");
@@ -281,6 +281,33 @@ mod tests {
             remember_password: false,
         };
         let password = "dum-e-local-test-only";
+        let arrays = execute(
+            &p,
+            password,
+            r#"SELECT ARRAY['drug-1', NULL] AS active_drug_ids,
+                      ARRAY[[1,2],[3,4]] AS matrix, '{}'::boolean[] AS empty,
+                      NULL::text[] AS missing, '1 day'::interval AS duration,
+                      '10.0.0.1'::inet AS address, true AS active"#,
+            flag(),
+        )
+        .await
+        .unwrap();
+        assert!(arrays.error.is_none(), "{:?}", arrays.error);
+        let result = &arrays.results[0];
+        assert!(!result.truncated);
+        assert_eq!(result.columns[0].name, "active_drug_ids");
+        assert_eq!(
+            result.rows,
+            vec![vec![
+                json!("{drug-1,NULL}"),
+                json!("{{1,2},{3,4}}"),
+                json!("{}"),
+                json!(null),
+                json!("1 day"),
+                json!("10.0.0.1"),
+                json!(true),
+            ]]
+        );
         let fidelity = execute(&p, password,
             r#"SELECT 'null'::json, NULL::json, '{"id":9007199254740993,"id":9007199254740994}'::json, '{"exact":1234567890.123456789}'::jsonb"#,
             flag()).await.unwrap();

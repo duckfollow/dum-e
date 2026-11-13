@@ -11,11 +11,12 @@ export function editableType(type: string) {
 }
 export const jsonColumn = (column: ColumnInfo) =>
   /^(json|jsonb)$/i.test(column.dataType);
+const arrayColumn = (column: ColumnInfo) => column.dataType.endsWith("[]");
 export function editableColumn(column: ColumnInfo, postgres = false) {
   return (
     !column.generated &&
     !column.identity &&
-    ((postgres && jsonColumn(column)) ||
+    ((postgres && (jsonColumn(column) || arrayColumn(column))) ||
       column.enumValues.length > 0 ||
       editableType(column.dataType))
   );
@@ -35,7 +36,9 @@ export function editableRow(
     row.length === details.columns.length &&
     details.columns.every(
       (c, i) =>
-        c.name === result.columns[i]?.name && (!jsonColumn(c) || postgres),
+        c.name === result.columns[i]?.name &&
+        (!result.columns[i]?.previewCast || (postgres && arrayColumn(c))) &&
+        (!jsonColumn(c) || postgres),
     ) &&
     keys.every((i) => row[i] !== null) &&
     row.every(
@@ -55,6 +58,7 @@ export function parseCell(
     if (!column.nullable) throw Error("This column does not allow NULL.");
     return null;
   }
+  if (arrayColumn(column)) return text;
   if (jsonColumn(column)) {
     try {
       JSON.parse(text);

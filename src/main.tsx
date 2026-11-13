@@ -61,6 +61,7 @@ import {
   ExternalLink,
   Save,
   GitFork,
+  Ellipsis,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { SqlEditor } from "./SqlEditor";
@@ -344,6 +345,17 @@ function App() {
           id: tab.profileId,
           requestId,
           sql: sqlText,
+          preview:
+            tab.table &&
+            sqlText ===
+              tableSql(
+                tab.table,
+                page,
+                previewOptions,
+                connections[tab.profileId].profile.driver,
+              )
+              ? tab.table
+              : undefined,
         });
         recordHistory(result.elapsedMs);
         if (automatic) {
@@ -591,6 +603,30 @@ function App() {
     const remaining = tabs.filter((t) => t.id !== tab.id);
     setTabs(remaining);
     if (activeId === tab.id) setActiveId(remaining.at(-1)?.id || "");
+  }
+  const tabActionsRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    function dismissTabActions(event: PointerEvent) {
+      const menu = tabActionsRef.current;
+      if (
+        menu?.open &&
+        event.target instanceof Node &&
+        !menu.contains(event.target)
+      )
+        menu.open = false;
+    }
+    document.addEventListener("pointerdown", dismissTabActions);
+    return () => document.removeEventListener("pointerdown", dismissTabActions);
+  }, []);
+
+  function closeAllTabs() {
+    if (guardEdits()) return;
+    if (busyRef.current) {
+      setToast("Wait for the current query to finish before closing tabs.");
+      return;
+    }
+    setTabs([]);
+    setActiveId("");
   }
   const result = active?.result,
     rows = result ? filteredRows(result, filter, sort) : [],
@@ -979,51 +1015,84 @@ function App() {
           </div>
         ) : (
           <div className="workspace">
-            <div className="tabs" role="tablist" aria-label="Workspace tabs">
-              {tabs.map((t) => (
-                <div
-                  key={t.id}
-                  className={`tab ${t.id === activeId ? "active" : ""}`}
+            <div className="workspace-tab-bar">
+              <div className="tabs" role="tablist" aria-label="Workspace tabs">
+                {tabs.map((t) => (
+                  <div
+                    key={t.id}
+                    className={`tab ${t.id === activeId ? "active" : ""}`}
+                  >
+                    <button
+                      role="tab"
+                      aria-selected={t.id === activeId}
+                      onClick={() => {
+                        if (t.id !== activeId && guardEdits()) return;
+                        setActiveId(t.id);
+                        setSelectedId(t.profileId);
+                      }}
+                    >
+                      {busy === t.id ? (
+                        <LoaderCircle size={14} className="spin" />
+                      ) : t.overview ? (
+                        <GitFork size={14} />
+                      ) : t.table ? (
+                        <Table2 size={14} />
+                      ) : (
+                        <FileCode2 size={14} />
+                      )}
+                      <span>{t.title}</span>
+                    </button>
+                    <button
+                      className="tab-close"
+                      aria-label={`Close ${t.title}`}
+                      aria-disabled={busy === t.id}
+                      onClick={() => closeTab(t)}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  className="add-tab icon-button"
+                  title="New SQL tab"
+                  aria-label="New SQL tab"
+                  onClick={() => newQuery()}
+                  disabled={!profile}
                 >
-                  <button
-                    role="tab"
-                    aria-selected={t.id === activeId}
-                    onClick={() => {
-                      if (t.id !== activeId && guardEdits()) return;
-                      setActiveId(t.id);
-                      setSelectedId(t.profileId);
-                    }}
-                  >
-                    {busy === t.id ? (
-                      <LoaderCircle size={14} className="spin" />
-                    ) : t.overview ? (
-                      <GitFork size={14} />
-                    ) : t.table ? (
-                      <Table2 size={14} />
-                    ) : (
-                      <FileCode2 size={14} />
-                    )}
-                    <span>{t.title}</span>
-                  </button>
-                  <button
-                    className="tab-close"
-                    aria-label={`Close ${t.title}`}
-                    aria-disabled={busy === t.id}
-                    onClick={() => closeTab(t)}
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-              ))}
-              <button
-                className="add-tab icon-button"
-                title="New SQL tab"
-                aria-label="New SQL tab"
-                onClick={() => newQuery()}
-                disabled={!profile}
+                  <Plus size={16} />
+                </button>
+              </div>
+              <details
+                ref={tabActionsRef}
+                className="workspace-tab-actions"
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape" || !event.currentTarget.open)
+                    return;
+                  event.currentTarget.open = false;
+                  event.currentTarget.querySelector("summary")?.focus();
+                }}
               >
-                <Plus size={16} />
-              </button>
+                <summary
+                  className="icon-button"
+                  aria-label="Tab actions"
+                  title="Tab actions"
+                >
+                  <Ellipsis size={16} aria-hidden="true" />
+                </summary>
+                <button
+                  className="workspace-close-tabs"
+                  onClick={(event) => {
+                    const menu = event.currentTarget.closest("details");
+                    if (menu) {
+                      menu.open = false;
+                      menu.querySelector("summary")?.focus();
+                    }
+                    closeAllTabs();
+                  }}
+                >
+                  Close all tabs
+                </button>
+              </details>
             </div>
             {active.overview ? (
               <DatabaseRelations
@@ -1491,6 +1560,7 @@ function App() {
                                   id: active.profileId,
                                   requestId: crypto.randomUUID(),
                                   sql: active.sql,
+                                  preview: active.table,
                                 },
                               );
                               patch(active.id, {

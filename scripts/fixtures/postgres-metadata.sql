@@ -21,3 +21,19 @@ CREATE INDEX child_expression_partial ON catalog_test.child (lower(label)) INCLU
 CREATE TABLE catalog_test."odd""table" ("odd""column" text DEFAULT 'quoted');
 CREATE VIEW catalog_test.child_view AS SELECT id,label FROM catalog_test.child;
 CREATE MATERIALIZED VIEW catalog_test.child_materialized AS SELECT id FROM catalog_test.child WITH NO DATA;
+
+CREATE SCHEMA IF NOT EXISTS shop_demo;
+CREATE TYPE shop_demo.dum_e_preview_status AS ENUM ('ready');
+CREATE TABLE shop_demo.dum_e_preview_types (
+    id integer,
+    active_drug_ids text[],
+    numbers integer[],
+    duration interval,
+    "IP""address" inet,
+    status shop_demo.dum_e_preview_status,
+    payload jsonb
+);
+INSERT INTO shop_demo.dum_e_preview_types VALUES
+    (2, '{}', ARRAY[10], NULL, NULL, NULL, NULL),
+    (1, ARRAY['alpha', NULL], ARRAY[2], '1 day', '10.0.0.1', 'ready', '{"a":1}'),
+    (3, NULL, NULL, NULL, NULL, NULL, NULL);
