@@ -65,7 +65,15 @@ export function EditableGrid({
   onEditing,
   onApplied,
   onOpenJson,
+  initialColumn,
+  initialRow = 0,
+  updateOnly = false,
+  onDiscard,
 }: {
+  initialColumn?: string;
+  initialRow?: number;
+  updateOnly?: boolean;
+  onDiscard?: () => void;
   tab: QueryTab;
   cache: TableDetailsCache;
   rows: { values: Cell[]; index: number }[];
@@ -293,7 +301,23 @@ export function EditableGrid({
     setEditor({ row, column, text: value == null ? "" : String(value), mode });
     setError("");
   }
+  const initialEditStarted = useRef(false);
+  useEffect(() => {
+    if (
+      !initialColumn ||
+      !canEdit ||
+      !source.rows[initialRow] ||
+      initialEditStarted.current
+    )
+      return;
+    initialEditStarted.current = true;
+    const column =
+      details?.columns.findIndex(({ name }) => name === initialColumn) ?? -1;
+    if (column >= 0) start(initialRow, column);
+  }, [initialColumn, initialRow, canEdit, details, source]);
+
   function add() {
+    if (updateOnly) return;
     if (
       !canEdit ||
       !details ||
@@ -318,6 +342,7 @@ export function EditableGrid({
     });
   }
   function remove() {
+    if (updateOnly) return;
     if (!canEdit || !finalized()) return;
     const indices = [...selected]
       .filter((k) => k.startsWith("row:"))
@@ -704,41 +729,46 @@ export function EditableGrid({
         </div>
       ) : (
         <div className="grid-edit-toolbar">
-          <div>
-            <button
-              className="secondary small"
-              disabled={!canEdit || count >= 200}
-              onClick={add}
-            >
-              <Plus size={13} />
-              Add row
-            </button>
-            <button
-              className="text-button"
-              disabled={!canEdit || !selected.size}
-              onClick={remove}
-            >
-              <Trash2 size={13} />
-              Delete{selected.size ? ` (${selected.size})` : ""}
-            </button>
-          </div>
-          <div>
+          {!updateOnly && (
+            <div>
+              <button
+                className="secondary small"
+                disabled={!canEdit || count >= 200}
+                onClick={add}
+              >
+                <Plus size={13} />
+                Add row
+              </button>
+              <button
+                className="text-button"
+                disabled={!canEdit || !selected.size}
+                onClick={remove}
+              >
+                <Trash2 size={13} />
+                Delete{selected.size ? ` (${selected.size})` : ""}
+              </button>
+            </div>
+          )}
+          <div className="grid-edit-actions">
             <span className="grid-edit-summary">
-              {count
-                ? `${draft.inserted.length} new · ${Object.keys(draft.edits).filter((i) => !draft.deleted.includes(Number(i))).length} edited · ${draft.deleted.length} deleted`
-                : details
-                  ? "Double-click a cell to edit · Enter to finish"
-                  : "Reading table…"}
+              {count && updateOnly
+                ? `${count} ${count === 1 ? "row" : "rows"} edited`
+                : count
+                  ? `${draft.inserted.length} new · ${Object.keys(draft.edits).filter((i) => !draft.deleted.includes(Number(i))).length} edited · ${draft.deleted.length} deleted`
+                  : details
+                    ? "Double-click a cell to edit · Enter to finish"
+                    : "Reading table…"}
             </span>
             {failed ? (
               <>
                 <button
                   className="text-button"
-                  disabled={saving || (!count && !editor)}
+                  disabled={saving || (!onDiscard && !count && !editor)}
                   onClick={() => {
                     setDraft(emptyDraft());
                     setEditor(null);
                     setSelected(new Set());
+                    onDiscard?.();
                     setError(
                       "Changes discarded. Reload before editing this table again.",
                     );
@@ -758,13 +788,14 @@ export function EditableGrid({
               <>
                 <button
                   className="text-button"
-                  disabled={(!count && !editor) || saving}
+                  disabled={(!onDiscard && !count && !editor) || saving}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     setDraft(emptyDraft());
                     setEditor(null);
                     setError("");
                     setSelected(new Set());
+                    onDiscard?.();
                   }}
                 >
                   <X size={13} />
@@ -813,7 +844,7 @@ export function EditableGrid({
         <table className="data-grid">
           <thead>
             <tr>
-              {showEditControls && (
+              {showEditControls && !updateOnly && (
                 <th className="grid-selection">
                   <input
                     type="checkbox"
@@ -910,7 +941,7 @@ export function EditableGrid({
                 className={`${draft.deleted.includes(index) ? "grid-row-deleted " : ""}${selectedRow === index ? "selected-row" : ""}`}
                 onClick={() => onRow(index)}
               >
-                {showEditControls && (
+                {showEditControls && !updateOnly && (
                   <td className="grid-selection">
                     <input
                       type="checkbox"

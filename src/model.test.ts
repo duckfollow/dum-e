@@ -106,3 +106,29 @@ test("array display distinguishes quoted values, SQL NULL elements and nesting",
   );
   assert.deepEqual(formatArrayPreview("{}", false), []);
 });
+
+test("opening a selected row preserves all key predicates alongside grid filters", () => {
+  const sql = tableSql(
+    { schema: "public", name: "items", kind: "table" },
+    0,
+    {
+      rowKeys: [
+        [
+          { column: "tenant", value: "O'Reilly" },
+          { column: "id", value: "9007199254740993" },
+        ],
+        [
+          { column: "tenant", value: "other" },
+          { column: "id", value: "2" },
+        ],
+      ],
+      filter: { column: "deleted", operator: "is-null", value: "" },
+    },
+    "postgres",
+  );
+  assert.ok(
+    sql.includes(
+      `WHERE (("tenant" = $dum_e$O'Reilly$dum_e$ AND "id" = $dum_e$9007199254740993$dum_e$) OR ("tenant" = $dum_e$other$dum_e$ AND "id" = $dum_e$2$dum_e$)) AND "deleted" IS NULL`,
+    ),
+  );
+});

@@ -37,6 +37,12 @@ export interface ExecutionResult {
   error?: string;
   elapsedMs: number;
   omittedResults: number;
+  refreshSql?: string;
+  editSource?: {
+    table: Table;
+    keys: [string, number][];
+    columns: (string | null)[];
+  };
 }
 export interface Connected {
   profile: Profile;
@@ -44,6 +50,7 @@ export interface Connected {
   schemas?: string[];
 }
 export interface PreviewOptions {
+  rowKeys?: { column: string; value: string }[][];
   filter?: {
     column: string;
     operator: "equals" | "is-null" | "not-null";
@@ -65,6 +72,7 @@ export interface QueryTab {
   page: number;
   result?: QueryResult;
   execution?: ExecutionResult;
+  refreshError?: string;
   error?: string;
 }
 export const PAGE_SIZE = 200;
@@ -79,26 +87,35 @@ export function tableSql(
     "SELECT *",
     `FROM ${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}`,
   ];
+  const literal = (value: string) => {
+    if (value.includes("\0"))
+      throw Error("Filter values cannot contain a NUL character.");
+    if (driver !== "postgres") return `'${value.replaceAll("'", "''")}'`;
+    let delimiter = "$dum_e$";
+    while (value.includes(delimiter))
+      delimiter = delimiter.replace("$d", "$dd");
+    return `${delimiter}${value}${delimiter}`;
+  };
+  const predicates: string[] = [];
+  if (options?.rowKeys?.length) {
+    const matches = options.rowKeys.map(
+      (key) =>
+        `(${key.map(({ column, value }) => `${quoteIdentifier(column)} = ${literal(value)}`).join(" AND ")})`,
+    );
+    predicates.push(`(${matches.join(" OR ")})`);
+  }
   const filter = options?.filter;
   if (filter) {
     const column = quoteIdentifier(filter.column);
     if (filter.operator === "equals") {
-      if (filter.value.includes("\0"))
-        throw Error("Filter values cannot contain a NUL character.");
-      let literal = `'${filter.value.replaceAll("'", "''")}'`;
-      if (driver === "postgres") {
-        let delimiter = "$dum_e$";
-        while (filter.value.includes(delimiter))
-          delimiter = delimiter.replace("$d", "$dd");
-        literal = `${delimiter}${filter.value}${delimiter}`;
-      }
-      lines.push(`WHERE ${column} = ${literal}`);
+      predicates.push(`${column} = ${literal(filter.value)}`);
     } else {
-      lines.push(
-        `WHERE ${column} IS ${filter.operator === "not-null" ? "NOT " : ""}NULL`,
+      predicates.push(
+        `${column} IS ${filter.operator === "not-null" ? "NOT " : ""}NULL`,
       );
     }
   }
+  if (predicates.length) lines.push(`WHERE ${predicates.join(" AND ")}`);
   const sort = options?.sort;
   if (sort) {
     const direction = sort.direction === "DESC" ? "DESC" : "ASC";

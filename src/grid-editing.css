@@ -21,6 +21,9 @@
   align-items: center;
   gap: 10px;
 }
+.grid-edit-actions {
+  margin-inline-start: auto;
+}
 .grid-edit-summary {
   color: var(--muted);
   font-size: 10px;

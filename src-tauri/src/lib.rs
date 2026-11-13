@@ -311,6 +311,7 @@ async fn execute_sql(
     id: String,
     request_id: String,
     sql: String,
+    read_only: Option<bool>,
 ) -> Result<execution::ExecutionResult, String> {
     uuid::Uuid::parse_str(&request_id).map_err(|_| "Invalid query ID")?;
     let flag = Arc::new(AtomicBool::new(false));
@@ -331,7 +332,13 @@ async fn execute_sql(
         id: request_id,
         flag: flag.clone(),
     };
-    let work = execution::execute(&s.profile, &s.password, &sql, flag.clone());
+    let work = execution::execute_mode(
+        &s.profile,
+        &s.password,
+        &sql,
+        flag.clone(),
+        read_only.unwrap_or(false),
+    );
     tokio::pin!(work);
     let mut ticks = tokio::time::interval(Duration::from_millis(50));
     let deadline = tokio::time::sleep(Duration::from_secs(20));

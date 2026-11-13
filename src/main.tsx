@@ -62,6 +62,7 @@ import {
   Save,
   GitFork,
   Ellipsis,
+  Pencil,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { SqlEditor } from "./SqlEditor";
@@ -278,6 +279,7 @@ function App() {
     selectionOnly = false,
     automatic = false,
     previewOptions = tab.previewOptions,
+    readOnly = false,
   ) {
     if (editingRef.current) {
       if (!automatic) guardEdits();
@@ -327,10 +329,18 @@ function App() {
           id: tab.profileId,
           requestId,
           sql: sqlText,
+          readOnly,
         });
+        if (readOnly && execution.error) {
+          patch(tab.id, { refreshError: execution.error });
+          return false;
+        }
         recordHistory(execution.elapsedMs, execution.error);
         patch(tab.id, {
-          execution,
+          refreshError: undefined,
+          execution: execution.editSource
+            ? { ...execution, refreshSql: sqlText }
+            : execution,
           result: execution.results.at(-1)
             ? reconciledResult(tab.result, execution.results.at(-1)!)
             : execution.error
@@ -381,6 +391,10 @@ function App() {
       }
       return true;
     } catch (e) {
+      if (readOnly) {
+        patch(tab.id, { refreshError: String(e) });
+        return false;
+      }
       recordHistory(Date.now() - startedAt, String(e));
       if (automatic) {
         setTabs((ts) =>
@@ -393,7 +407,7 @@ function App() {
       } else patch(tab.id, { error: String(e) });
       return false;
     } finally {
-      if (!tab.table && !automatic) {
+      if (!tab.table && !automatic && !readOnly) {
         try {
           const catalog = await readCatalog(tab.profileId);
           setConnections((cs) =>
@@ -636,6 +650,130 @@ function App() {
           .toLowerCase()
           .includes(tableSearch.toLowerCase()),
       ) || [];
+  useLayoutEffect(() => {
+    setSelectedRow(null);
+  }, [result]);
+
+  const [resultRowEditor, setResultRowEditor] = useState<{
+    owner: string;
+    tab: QueryTab;
+    column?: string;
+    initialRow?: number;
+    expected: number;
+  } | null>(null);
+  useLayoutEffect(() => {
+    setResultRowEditor((current) =>
+      current?.owner === activeId ? current : null,
+    );
+  }, [activeId]);
+  const inlineRow =
+    resultRowEditor?.owner === activeId ? resultRowEditor : null;
+  const [checkedResults, setCheckedResults] = useState<{
+    result: QueryResult | undefined;
+    indices: number[];
+  }>({ result: undefined, indices: [] });
+  const checked =
+    checkedResults.result === result ? checkedResults.indices : [];
+  const editTargets = checked.length
+    ? checked
+    : selectedRow === null
+      ? []
+      : [selectedRow];
+
+  async function openResultRow(
+    indices: number[],
+    column?: string,
+    clickedIndex?: number,
+  ) {
+    const source = active?.execution?.editSource;
+
+    if (
+      !active ||
+      !source ||
+      !result ||
+      !indices.length ||
+      !profile ||
+      busyRef.current ||
+      guardEdits()
+    )
+      return;
+    const keys = indices.map((index) =>
+      source.keys.map(([column, i]) => ({
+        column,
+        value: result.rows[index]?.[i],
+      })),
+    );
+    if (
+      keys.some((key) =>
+        key.some(({ value }) => value == null || typeof value === "object"),
+      )
+    ) {
+      setToast("A selected row does not contain a usable primary key.");
+      return;
+    }
+    const rowKeys = keys.map((key) =>
+      key.map(({ column, value }) => ({ column, value: String(value) })),
+    );
+    const previewOptions = {
+      rowKeys: [
+        ...new Map(rowKeys.map((key) => [JSON.stringify(key), key])).values(),
+      ],
+    };
+    const tab: QueryTab = {
+      id: crypto.randomUUID(),
+      profileId: active.profileId,
+      title: source.table.name,
+      table: source.table,
+      tableView: "data",
+      sql: tableSql(source.table, 0, previewOptions, profile.driver),
+      previewOptions,
+      page: 0,
+    };
+    setResultRowEditor({
+      owner: active.id,
+      tab,
+      column,
+      expected: previewOptions.rowKeys.length,
+    });
+    try {
+      const result = await api<QueryResult>("run_query", {
+        id: tab.profileId,
+        requestId: crypto.randomUUID(),
+        sql: tab.sql,
+        preview: tab.table,
+      });
+      if (result.rows.length !== previewOptions.rowKeys.length) {
+        throw Error(
+          "Some selected rows changed. Run the query again before editing.",
+        );
+      }
+      const initialRow =
+        clickedIndex === undefined
+          ? undefined
+          : result.rows.findIndex((row) =>
+              source.keys.every(([name, index]) => {
+                const columnIndex = result.columns.findIndex(
+                  (column) => column.name === name,
+                );
+                return (
+                  columnIndex >= 0 &&
+                  String(row[columnIndex]) ===
+                    String(active.result?.rows[clickedIndex]?.[index])
+                );
+              }),
+            );
+      setResultRowEditor((current) =>
+        current?.tab.id === tab.id
+          ? { ...current, initialRow, tab: { ...tab, result } }
+          : current,
+      );
+    } catch (error) {
+      setToast(String(error));
+      setResultRowEditor((current) =>
+        current?.tab.id === tab.id ? null : current,
+      );
+    }
+  }
   function applyPreviewOptions(options: PreviewOptions) {
     if (!active?.table || !profile || busyRef.current || guardEdits()) return;
     try {
@@ -1238,6 +1376,7 @@ function App() {
                           page: 0,
                           result: undefined,
                           execution: undefined,
+                          refreshError: undefined,
                           error: undefined,
                         });
                       }}
@@ -1317,58 +1456,67 @@ function App() {
                       </div>
                     </div>
                   </div>
-                  {active.execution && (
-                    <div className="execution-summary" role="status">
-                      <div>
-                        <Check size={14} />
-                        <b>
-                          {active.execution.error
-                            ? "Execution needs attention"
-                            : "Execution finished"}
-                        </b>
-                        <span>
-                          {active.execution.results.length} completed
-                          statement(s) · {active.execution.elapsedMs} ms
-                        </span>
-                        {active.execution.results.length > 0 && (
-                          <select
-                            aria-label="Statement result"
-                            value={active.execution.results.indexOf(result!)}
-                            onChange={(e) => {
-                              patch(active.id, {
-                                result:
-                                  active.execution!.results[
-                                    Number(e.target.value)
-                                  ],
-                              });
-                              setFilter("");
-                              setSort(null);
-                              setSelectedRow(null);
-                            }}
-                          >
-                            {active.execution.results.map((r, i) => (
-                              <option key={i} value={i}>
-                                Statement {i + 1} ·{" "}
-                                {r.columns.length
-                                  ? `${r.rows.length}${r.truncated ? "+" : ""} preview rows`
-                                  : "No preview rows"}{" "}
-                                · affected: {r.affectedRows ?? "—"}
-                              </option>
-                            ))}
-                          </select>
+                  {active.execution &&
+                    (active.execution.results.length > 1 ||
+                      active.execution.error ||
+                      active.execution.omittedResults > 0) && (
+                      <div className="execution-summary" role="status">
+                        <div>
+                          <Check size={14} />
+                          <b>
+                            {active.execution.error
+                              ? "Execution needs attention"
+                              : "Execution finished"}
+                          </b>
+                          <span>
+                            {active.execution.results.length} completed
+                            statement(s) · {active.execution.elapsedMs} ms
+                          </span>
+                          {active.execution.results.length > 1 && (
+                            <select
+                              aria-label="Statement result"
+                              disabled={!!inlineRow || !!busy}
+                              value={Math.max(
+                                0,
+                                active.execution.results.indexOf(result!) === -1
+                                  ? active.execution.results.length - 1
+                                  : active.execution.results.indexOf(result!),
+                              )}
+                              onChange={(e) => {
+                                patch(active.id, {
+                                  result:
+                                    active.execution!.results[
+                                      Number(e.target.value)
+                                    ],
+                                });
+                                setFilter("");
+                                setSort(null);
+                                setSelectedRow(null);
+                              }}
+                            >
+                              {active.execution.results.map((r, i) => (
+                                <option key={i} value={i}>
+                                  Statement {i + 1} ·{" "}
+                                  {r.columns.length
+                                    ? `${r.rows.length}${r.truncated ? "+" : ""} preview rows`
+                                    : "No preview rows"}{" "}
+                                  · affected: {r.affectedRows ?? "—"}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                        {active.execution.omittedResults > 0 && (
+                          <p>
+                            {active.execution.omittedResults} additional
+                            statement results omitted from preview.
+                          </p>
+                        )}
+                        {active.execution.error && (
+                          <pre role="alert">{active.execution.error}</pre>
                         )}
                       </div>
-                      {active.execution.omittedResults > 0 && (
-                        <p>
-                          {active.execution.omittedResults} additional statement
-                          results omitted from preview.
-                        </p>
-                      )}
-                      {active.execution.error && (
-                        <pre role="alert">{active.execution.error}</pre>
-                      )}
-                    </div>
-                  )}
+                    )}
                   <div className="result-toolbar">
                     <div className="result-heading">
                       <Table2 size={15} />
@@ -1387,6 +1535,43 @@ function App() {
                       )}
                     </div>
                     <div className="result-actions">
+                      {!active.table &&
+                        active.execution &&
+                        !!result?.columns.length && (
+                          <span
+                            title={
+                              !active.execution.editSource
+                                ? "Select from one PostgreSQL table and include all primary key columns."
+                                : !profile
+                                  ? "Reconnect to edit rows."
+                                  : busy
+                                    ? "Wait for the current query to finish."
+                                    : !editTargets.length
+                                      ? "Select rows to edit."
+                                      : "Edit the selected rows in Results."
+                            }
+                          >
+                            <button
+                              className="text-button"
+                              disabled={
+                                !active.execution.editSource ||
+                                !!inlineRow ||
+                                !editTargets.length ||
+                                !profile ||
+                                !!busy
+                              }
+                              onClick={() => {
+                                void openResultRow(editTargets);
+                              }}
+                            >
+                              <Pencil size={13} aria-hidden="true" />
+                              {editTargets.length > 1
+                                ? `Edit rows (${editTargets.length})`
+                                : "Edit row"}
+                            </button>
+                          </span>
+                        )}
+
                       <div className="result-filter">
                         <Search size={13} />
                         <input
@@ -1415,7 +1600,19 @@ function App() {
                         aria-busy={!!busy}
                         disabled={!profile}
                         onClick={() => {
-                          if (!busyRef.current) void execute(active);
+                          if (busyRef.current) return;
+                          const refreshSql = active.execution?.refreshSql;
+                          if (refreshSql)
+                            void execute(
+                              active,
+                              refreshSql,
+                              0,
+                              true,
+                              false,
+                              undefined,
+                              true,
+                            );
+                          else void execute(active);
                         }}
                       >
                         <RefreshCw size={14} />
@@ -1464,8 +1661,87 @@ function App() {
                       </span>
                     </div>
                   )}
+                  {!active.table &&
+                    active.execution?.editSource &&
+                    !inlineRow?.tab.result && (
+                      <div className="grid-edit-toolbar">
+                        <div className="grid-edit-actions">
+                          <span className="grid-edit-summary">
+                            {inlineRow
+                              ? "Loading rows…"
+                              : "Double-click a cell to edit"}
+                          </span>
+                          <button className="text-button" disabled>
+                            <X size={13} /> Discard
+                          </button>
+                          <button className="primary small" disabled>
+                            <Check size={13} /> Save
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  {active.refreshError && (
+                    <div className="grid-edit-error" role="alert">
+                      Changes saved. Results could not refresh. Use Refresh to
+                      retry.
+                      <div>{active.refreshError}</div>
+                    </div>
+                  )}
                   <div className="result-body">
-                    {active.error && !result ? (
+                    {inlineRow?.tab.result &&
+                    inlineRow.tab.result.rows.length === inlineRow.expected ? (
+                      <EditableGrid
+                        key={inlineRow.tab.id}
+                        tab={inlineRow.tab}
+                        initialColumn={inlineRow.column}
+                        initialRow={inlineRow.initialRow}
+                        updateOnly
+                        onDiscard={() => {
+                          updateEditing(false);
+                          setResultRowEditor(null);
+                        }}
+                        cache={tableDetailsCache}
+                        rows={filteredRows(inlineRow.tab.result, "", null)}
+                        sort={null}
+                        onSort={() => {}}
+                        onTableSort={() => {}}
+                        onPreviewOptions={() => {}}
+                        selectedRow={inlineRow.initialRow ?? null}
+                        onRow={() => {}}
+                        connected={!!profile}
+                        postgres
+                        busy={!!busy}
+                        onEditing={updateEditing}
+                        onOpenJson={setJsonViewer}
+                        onApplied={async () => {
+                          updateEditing(false);
+                          setResultRowEditor(null);
+                          setSelectedRow(null);
+                          const refreshSql = active.execution?.refreshSql;
+                          if (!refreshSql) {
+                            setToast(
+                              "Row saved. Refresh Results to see the latest data.",
+                            );
+                            return;
+                          }
+                          setToast("Row saved. Refreshing results…");
+                          const refreshed = await execute(
+                            active,
+                            refreshSql,
+                            0,
+                            true,
+                            false,
+                            undefined,
+                            true,
+                          );
+                          setToast(
+                            refreshed
+                              ? "Changes saved. Results refreshed."
+                              : "Changes saved. Results could not refresh.",
+                          );
+                        }}
+                      />
+                    ) : active.error && !result ? (
                       <div className="query-error" role="alert">
                         <AlertCircle size={24} />
                         <h3>Let’s take another look.</h3>
@@ -1576,6 +1852,39 @@ function App() {
                             <table className="data-grid">
                               <thead>
                                 <tr>
+                                  {active.execution?.editSource && (
+                                    <th className="grid-selection">
+                                      <input
+                                        type="checkbox"
+                                        aria-label="Select visible result rows"
+                                        checked={
+                                          rows.length > 0 &&
+                                          rows.every(({ index }) =>
+                                            checked.includes(index),
+                                          )
+                                        }
+                                        onChange={(event) => {
+                                          const visible = rows.map(
+                                            ({ index }) => index,
+                                          );
+                                          setCheckedResults({
+                                            result,
+                                            indices: event.target.checked
+                                              ? [
+                                                  ...new Set([
+                                                    ...checked,
+                                                    ...visible,
+                                                  ]),
+                                                ]
+                                              : checked.filter(
+                                                  (index) =>
+                                                    !visible.includes(index),
+                                                ),
+                                          });
+                                        }}
+                                      />
+                                    </th>
+                                  )}
                                   <th className="row-number">#</th>
                                   {result.columns.map((c, i) => (
                                     <th key={i}>
@@ -1635,13 +1944,77 @@ function App() {
                                       setInspector(true);
                                     }}
                                   >
+                                    {active.execution?.editSource && (
+                                      <td className="grid-selection">
+                                        <input
+                                          type="checkbox"
+                                          aria-label={`Select result row ${index + 1}`}
+                                          checked={checked.includes(index)}
+                                          onClick={(event) =>
+                                            event.stopPropagation()
+                                          }
+                                          onKeyDown={(event) =>
+                                            event.stopPropagation()
+                                          }
+                                          onChange={(event) =>
+                                            setCheckedResults({
+                                              result,
+                                              indices: event.target.checked
+                                                ? [...checked, index]
+                                                : checked.filter(
+                                                    (item) => item !== index,
+                                                  ),
+                                            })
+                                          }
+                                        />
+                                      </td>
+                                    )}
                                     <td className="row-number">
                                       {active.page * PAGE_SIZE + index + 1}
                                     </td>
                                     {values.map((v, i) => (
                                       <td
                                         key={i}
-                                        title={cellText(v)}
+                                        onDoubleClick={(event) => {
+                                          const column =
+                                            active.execution?.editSource
+                                              ?.columns[i];
+                                          if (
+                                            !column &&
+                                            active.execution?.editSource
+                                          ) {
+                                            event.stopPropagation();
+                                            setToast(
+                                              "This result column cannot be edited directly.",
+                                            );
+                                            return;
+                                          }
+                                          if (
+                                            !column ||
+                                            !profile ||
+                                            busyRef.current
+                                          )
+                                            return;
+                                          event.stopPropagation();
+                                          const targets = checked.includes(
+                                            index,
+                                          )
+                                            ? checked
+                                            : rows.map((row) => row.index);
+                                          void openResultRow(
+                                            targets,
+                                            column,
+                                            index,
+                                          );
+                                        }}
+                                        title={
+                                          active.execution?.editSource &&
+                                          !active.execution.editSource.columns[
+                                            i
+                                          ]
+                                            ? `Read-only result column · ${cellText(v)}`
+                                            : cellText(v)
+                                        }
                                         className={
                                           v === null
                                             ? "null-cell"

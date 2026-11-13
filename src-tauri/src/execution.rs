@@ -18,7 +18,16 @@ pub struct ExecutionResult {
     pub error: Option<String>,
     pub elapsed_ms: u128,
     pub omitted_results: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edit_source: Option<EditSource>,
 }
+#[derive(Serialize)]
+pub struct EditSource {
+    table: db::Table,
+    keys: Vec<(String, usize)>,
+    columns: Vec<Option<String>>,
+}
+
 fn permission_error(error: &sqlx::Error, profile: &Profile) -> String {
     let hint = match error {
         sqlx::Error::Database(db) if db.code().as_deref() == Some("42501") =>
@@ -63,11 +72,22 @@ fn retain(
         current.rows.push(row);
     }
 }
+#[cfg(test)]
 pub async fn execute(
     profile: &Profile,
     password: &str,
     sql: &str,
     cancel: Arc<AtomicBool>,
+) -> Result<ExecutionResult, String> {
+    execute_mode(profile, password, sql, cancel, false).await
+}
+
+pub async fn execute_mode(
+    profile: &Profile,
+    password: &str,
+    sql: &str,
+    cancel: Arc<AtomicBool>,
+    read_only: bool,
 ) -> Result<ExecutionResult, String> {
     profile.validate()?;
     if sql.trim().is_empty() || sql.len() > 65536 {
@@ -76,7 +96,7 @@ pub async fn execute(
     // SQLite reports the previous DML count for SELECT/DDL. Only label counts
     // as affected rows for parsed DML; parsing never gates raw SQL execution.
     use sqlparser::{
-        ast::Statement,
+        ast::{GroupByExpr, SetExpr, Statement, TableFactor},
         dialect::{PostgreSqlDialect, SQLiteDialect},
         parser::Parser,
     };
@@ -85,6 +105,21 @@ pub async fn execute(
     } else {
         Parser::parse_sql(&SQLiteDialect {}, sql)
     };
+    let simple_select = parsed.as_ref().is_ok_and(|statements| {
+        let [Statement::Query(query)] = statements.as_slice() else { return false };
+        let SetExpr::Select(select) = query.body.as_ref() else { return false };
+        let [from] = select.from.as_slice() else { return false };
+        query.with.is_none()
+            && select.into.is_none()
+            && select.distinct.is_none()
+            && select.having.is_none()
+            && matches!(&select.group_by, GroupByExpr::Expressions(exprs, modifiers) if exprs.is_empty() && modifiers.is_empty())
+            && from.joins.is_empty()
+            && matches!(&from.relation, TableFactor::Table { args: None, .. })
+    });
+    if read_only && (profile.driver != "postgres" || !simple_select) {
+        return Err("Refresh requires a single PostgreSQL table SELECT.".into());
+    }
     let affected_commands: Vec<bool> = parsed
         .unwrap_or_default()
         .into_iter()
@@ -104,18 +139,20 @@ pub async fn execute(
         error: None,
         elapsed_ms: 0,
         omitted_results: 0,
+        edit_source: None,
     };
     let mut current = empty();
     let mut bytes = 0usize;
     let mut preview_error = None;
     macro_rules! consume {
-        ($connection:expr, $cell:path, $raw:path) => {{
+        ($connection:expr, $cell:path, $raw:path, $origin:expr) => {{
             let mut stream = sqlx::raw_sql(sql).fetch_many($connection);
             loop {
                 if cancel.load(Ordering::Relaxed) { output.error = Some("Execution cancelled. Some changes may already be committed; inspect the database before retrying.".into()); break; }
                 match stream.try_next().await {
                     Ok(Some(Either::Right(row))) => {
                         if current.columns.is_empty() {
+                            ($origin)(&row);
                             current.columns = row.columns().iter().enumerate().map(|(i,c)| {
                                 let declared=c.type_info().name();
                                 let data_type=if declared=="NULL" {row.try_get_raw(i).map(|v|v.type_info().name().to_owned()).unwrap_or_else(|_|declared.into())} else {declared.into()};
@@ -139,7 +176,7 @@ pub async fn execute(
                     }
                     Ok(None) => break,
                     Err(e) => {
-                        output.error=Some(format!("{}\nExecution stopped. Completed statements are not a commit guarantee; earlier changes may be committed. Check the database before retrying.", permission_error(&e, profile)));
+                        output.error=Some(if read_only { e.to_string() } else { format!("{}\nExecution stopped. Completed statements are not a commit guarantee; earlier changes may be committed. Check the database before retrying.", permission_error(&e, profile)) });
                         break;
                     }
                 }
@@ -148,10 +185,33 @@ pub async fn execute(
     }
     if profile.driver == "sqlite" {
         let mut c = db::sqlite_mode(profile, cancel.clone(), true).await?;
-        consume!(&mut c, db::sqlite_cell, db::sqlite_json_raw);
+        consume!(&mut c, db::sqlite_cell, db::sqlite_json_raw, |_| {});
     } else {
-        let mut c = db::postgres_mode(profile, password, true).await?;
-        consume!(&mut c, db::pg_script_cell, db::pg_json_raw);
+        let mut c = db::postgres_mode(profile, password, !read_only).await?;
+        if read_only {
+            use sqlx::Executor;
+            c.execute("BEGIN READ ONLY")
+                .await
+                .map_err(|error| error.to_string())?;
+        };
+        let mut origins = Vec::new();
+        consume!(
+            &mut c,
+            db::pg_script_cell,
+            db::pg_json_raw,
+            |row: &sqlx::postgres::PgRow| {
+                if simple_select {
+                    origins = row
+                        .columns()
+                        .iter()
+                        .map(|column| column.relation_id().zip(column.relation_attribute_no()))
+                        .collect();
+                }
+            }
+        );
+        if simple_select && output.error.is_none() && preview_error.is_none() {
+            output.edit_source = postgres_edit_source(&mut c, &origins).await;
+        }
     }
     if let Some(e) = preview_error {
         let note=format!("SQL execution finished, but part of the result could not be previewed: {e}. Do not rerun writes just to refresh a preview.");
@@ -162,6 +222,70 @@ pub async fn execute(
     }
     output.elapsed_ms = start.elapsed().as_millis();
     Ok(output)
+}
+
+async fn postgres_edit_source(
+    connection: &mut sqlx::PgConnection,
+    origins: &[Option<(sqlx::postgres::types::Oid, i16)>],
+) -> Option<EditSource> {
+    let oid = origins.iter().flatten().next()?.0;
+    if origins
+        .iter()
+        .flatten()
+        .any(|(relation, _)| *relation != oid)
+    {
+        return None;
+    }
+    let columns = sqlx::query_as::<_, (String, String, String, i16)>(
+        "SELECT n.nspname::text, c.relname::text, a.attname::text, a.attnum
+         FROM pg_catalog.pg_class c
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+         JOIN pg_catalog.pg_constraint k ON k.conrelid = c.oid AND k.contype = 'p'
+         JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(k.conkey)
+         WHERE c.oid = $1 AND c.relkind IN ('r', 'p') AND c.relpersistence <> 't'
+           AND (c.relkind = 'p' OR NOT EXISTS (
+               SELECT 1 FROM pg_catalog.pg_inherits i WHERE i.inhparent = c.oid
+           ))
+         ORDER BY array_position(k.conkey, a.attnum)",
+    )
+    .bind(oid)
+    .fetch_all(&mut *connection)
+    .await
+    .ok()?;
+    let (schema, name, _, _) = columns.first()?;
+    let table = db::Table {
+        schema: schema.clone(),
+        name: name.clone(),
+        kind: "table".into(),
+    };
+    let keys = columns
+        .into_iter()
+        .map(|(_, _, column, ordinal)| {
+            let index = origins
+                .iter()
+                .position(|origin| *origin == Some((oid, ordinal)))?;
+            Some((column, index))
+        })
+        .collect::<Option<_>>()?;
+    let attributes = sqlx::query_as::<_, (i16, String)>(
+        "SELECT attnum, attname::text FROM pg_catalog.pg_attribute
+         WHERE attrelid = $1 AND attnum > 0 AND NOT attisdropped",
+    )
+    .bind(oid)
+    .fetch_all(connection)
+    .await
+    .ok()?
+    .into_iter()
+    .collect::<std::collections::HashMap<_, _>>();
+    let columns = origins
+        .iter()
+        .map(|origin| origin.and_then(|(_, ordinal)| attributes.get(&ordinal).cloned()))
+        .collect();
+    Some(EditSource {
+        table,
+        keys,
+        columns,
+    })
 }
 
 #[cfg(test)]
@@ -281,6 +405,55 @@ mod tests {
             remember_password: false,
         };
         let password = "dum-e-local-test-only";
+        let refreshed = execute_mode(
+            &p,
+            password,
+            "SELECT id, current_setting('transaction_read_only') FROM dum_e_test_items",
+            flag(),
+            true,
+        )
+        .await
+        .unwrap();
+        assert!(refreshed.error.is_none());
+        assert!(refreshed.edit_source.is_some());
+        assert_eq!(refreshed.results[0].rows[0][1], json!("on"));
+        let blocked = execute_mode(
+            &p,
+            password,
+            "SELECT id, pg_catalog.lo_create(0) FROM dum_e_test_items",
+            flag(),
+            true,
+        )
+        .await
+        .unwrap();
+        assert!(blocked
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("read-only")));
+        let selected = execute(
+            &p,
+            password,
+            "SELECT name, id AS selected_id FROM dum_e_test_items WHERE id = 1",
+            flag(),
+        )
+        .await
+        .unwrap();
+        let source = selected.edit_source.expect("direct key with an alias");
+        assert_eq!(source.table.schema, "public");
+        assert_eq!(source.table.name, "dum_e_test_items");
+        assert_eq!(source.keys, vec![("id".into(), 1)]);
+        assert_eq!(source.columns, vec![Some("name".into()), Some("id".into())]);
+        for sql in [
+            "SELECT id + 1 AS id FROM dum_e_test_items",
+            "SELECT name FROM dum_e_test_items",
+            "SELECT a.id FROM dum_e_test_items a JOIN dum_e_test_items b ON a.id = b.id",
+            "SELECT id FROM dum_e_test_items GROUP BY id",
+            "SELECT id FROM dum_e_test_items; SELECT id FROM dum_e_test_items",
+        ] {
+            let result = execute(&p, password, sql, flag()).await.unwrap();
+            assert!(result.error.is_none(), "{sql}: {:?}", result.error);
+            assert!(result.edit_source.is_none(), "{sql}");
+        }
         let arrays = execute(
             &p,
             password,
