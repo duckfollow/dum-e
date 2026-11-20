@@ -53,7 +53,7 @@ export function RemoveConnectionDialog({
       </header>
       <div className="dialog-content">
         <p id={description}>
-          Remove <strong>{profile.name}</strong> and its saved password from
+          Remove <strong>{profile.name}</strong> and its saved passwords from
           Dum-E? Your database and its data will not be deleted.
         </p>
         {connected && <p>This connection will be disconnected.</p>}

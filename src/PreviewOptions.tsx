@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { useEffect, useId, useRef, useState } from "react";
 import { Filter } from "lucide-react";
 import type { PreviewOptions } from "./model";
@@ -56,7 +57,8 @@ export function ColumnFilterDialog({
         <div className="column-filter-fields">
           <label>
             Condition
-            <select
+            <Select
+              aria-label="Filter condition"
               autoFocus
               value={operator}
               onChange={(event) =>
@@ -66,13 +68,14 @@ export function ColumnFilterDialog({
               <option value="equals">Equals</option>
               <option value="is-null">Is NULL</option>
               <option value="not-null">Is not NULL</option>
-            </select>
+            </Select>
           </label>
           {operator === "equals" && (
             <label>
               Value
               {column.enumValues.length > 0 ? (
-                <select
+                <Select
+                  aria-label="Filter value"
                   value={value}
                   onChange={(event) => setValue(event.target.value)}
                 >
@@ -81,7 +84,7 @@ export function ColumnFilterDialog({
                       {label || "(empty string)"}
                     </option>
                   ))}
-                </select>
+                </Select>
               ) : (
                 <input
                   placeholder="Enter a value"

@@ -39,7 +39,7 @@
   color: var(--secondary);
   font-size: 12px;
 }
-.overview-filters select,
+.overview-filters .select-trigger,
 .overview-filters input:not([type="checkbox"]) {
   background: var(--panel);
   color: var(--text);
@@ -234,7 +234,7 @@
 .overview-filters input[type="checkbox"] {
   accent-color: var(--accent);
 }
-.overview-filters select {
+.overview-filters .select-trigger {
   font-size: 11px;
   padding: 7px;
 }

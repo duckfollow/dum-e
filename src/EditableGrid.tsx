@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { ArrayCell } from "./ArrayCell";
 import { ColumnFilterDialog } from "./PreviewOptions";
 import { createPortal } from "react-dom";
@@ -547,7 +548,7 @@ export function EditableGrid({
                 }}
               />
             ) : c.enumValues.length > 0 ? (
-              <select
+              <Select
                 autoFocus
                 aria-label={`${c.name} value`}
                 disabled={editor.mode !== "value"}
@@ -562,9 +563,9 @@ export function EditableGrid({
                     {label || "(empty string)"}
                   </option>
                 ))}
-              </select>
+              </Select>
             ) : /^(bool|boolean)$/i.test(c.dataType) ? (
-              <select
+              <Select
                 autoFocus
                 aria-label={`${c.name} value`}
                 disabled={editor.mode !== "value"}
@@ -580,7 +581,7 @@ export function EditableGrid({
                 <option value="">Choose…</option>
                 <option value="true">true</option>
                 <option value="false">false</option>
-              </select>
+              </Select>
             ) : (
               <input
                 autoFocus
@@ -596,7 +597,7 @@ export function EditableGrid({
               />
             )}
             <div className={isJson ? "grid-json-actions" : "grid-value-mode"}>
-              <select
+              <Select
                 aria-label={`${c.name} value mode`}
                 value={editor.mode}
                 onChange={(e) =>
@@ -611,7 +612,7 @@ export function EditableGrid({
                   <option value="null">{isJson ? "SQL NULL" : "NULL"}</option>
                 )}
                 {isNew && <option value="default">Default</option>}
-              </select>
+              </Select>
               {isJson && (
                 <>
                   <button

@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { useEffect, useMemo, useState, useId } from "react";
 import {
   GitFork,
@@ -182,7 +183,7 @@ export function DatabaseRelations({
             <div className="overview-filters">
               <label>
                 Schema
-                <select
+                <Select
                   aria-label="Relation schema filter"
                   value={schema}
                   onChange={(e) => setSchema(e.target.value)}
@@ -198,7 +199,7 @@ export function DatabaseRelations({
                     .map((s) => (
                       <option key={s}>{s}</option>
                     ))}
-                </select>
+                </Select>
               </label>
               <label>
                 <Search size={14} />

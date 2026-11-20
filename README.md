@@ -66,11 +66,11 @@ The packaged app talks directly to databases through native Rust commands. No se
 
 **SQLite:** New connection → SQLite → choose an existing database file → Test connection → Connect. SQL access follows file and parent-folder permissions; browsing and metadata inspection use read-only connections.
 
-**PostgreSQL:** Enter name, host, port, database, username, and password. Verified TLS is enabled by default. TLS can be disabled for `localhost`, `127.0.0.1`, or `::1` only. Remote connections require a trusted certificate matching the hostname; self-signed/custom CA upload and client certificate authentication are not implemented yet. Remember password is opt-in and uses macOS Keychain.
+**PostgreSQL:** Enter name, host, port, database, username, and password. Verified TLS is enabled by default. TLS can be disabled for `localhost`, `127.0.0.1`, or `::1` only. Remote connections require a trusted certificate matching the hostname; self-signed/custom CA upload and client certificate authentication are not implemented yet. Remember passwords is opt-in and uses macOS Keychain.
 
 ### PostgreSQL through SSH
 
-Enable **Connect via SSH** in the connection dialog. Enter the SSH server host, port and username, then choose Password or Private key / SSH agent. SSH passwords are entered separately from database passwords and kept in memory for connection setup. Saved connections using SSH passwords prompt for them again. For key authentication, select a private key or leave it blank to use SSH agent. Load encrypted keys into the agent first with `ssh-add /absolute/path/to/key`.
+Enable **Connect via SSH** in the connection dialog. Enter the SSH server host, port and username, then choose Password or Private key / SSH agent. SSH passwords are entered separately from database passwords. Enable **Remember passwords** to store both in macOS Keychain and reconnect using the saved credentials. With it disabled, enter passwords on each connection. For key authentication, select a private key or leave it blank to use SSH agent. Load encrypted keys into the agent first with `ssh-add /absolute/path/to/key`.
 
 Verify and trust the SSH host in Terminal once, using `ssh -p PORT USER@HOST`. Dum-E requires a matching entry in your OpenSSH `known_hosts` file. It uses the system OpenSSH client with explicit connection settings and does not load `~/.ssh/config`.
 

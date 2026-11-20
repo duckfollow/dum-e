@@ -1,3 +1,6 @@
+import { LoadingProgress } from "./LoadingProgress";
+import { Select } from "./Select";
+import { PasswordInput } from "./PasswordInput";
 import { createTableDetailsCache } from "./table-details-cache";
 import type { TableDetails } from "./table-model";
 import { RemoveConnectionDialog } from "./RemoveConnectionDialog";
@@ -22,6 +25,7 @@ import React, {
   useMemo,
   useRef,
   useState,
+  useTransition,
 } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -193,6 +197,7 @@ function App() {
     [tableSearch, setTableSearch] = useState(""),
     [filter, setFilter] = useState(""),
     [sort, setSort] = useState<{ index: number; asc: boolean } | null>(null);
+  const [sorting, startSorting] = useTransition();
   const [removingConnection, setRemovingConnection] = useState<Profile | null>(
     null,
   );
@@ -351,22 +356,28 @@ function App() {
           error: undefined,
         });
       } else {
-        const result = await api<QueryResult>("run_query", {
-          id: tab.profileId,
-          requestId,
-          sql: sqlText,
-          preview:
-            tab.table &&
-            sqlText ===
-              tableSql(
-                tab.table,
-                page,
-                previewOptions,
-                connections[tab.profileId].profile.driver,
-              )
-              ? tab.table
-              : undefined,
-        });
+        const result = await api<QueryResult>(
+          "run_query",
+          {
+            id: tab.profileId,
+            requestId,
+            sql: sqlText,
+            preview:
+              tab.table &&
+              sqlText ===
+                tableSql(
+                  tab.table,
+                  page,
+                  previewOptions,
+                  connections[tab.profileId].profile.driver,
+                )
+                ? tab.table
+                : undefined,
+          },
+          previewOptions?.sort !== tab.previewOptions?.sort
+            ? "Sorting data…"
+            : "Running SQL…",
+        );
         recordHistory(result.elapsedMs);
         if (automatic) {
           setTabs((ts) => {
@@ -553,10 +564,7 @@ function App() {
       else newQuery(p.id);
       return;
     }
-    if (
-      p.driver === "postgres" &&
-      (!p.rememberPassword || p.ssh?.authentication === "password")
-    ) {
+    if (p.driver === "postgres" && !p.rememberPassword) {
       setModal(p);
       return;
     }
@@ -1021,6 +1029,9 @@ function App() {
         </div>
       </aside>
       <main className="main">
+        <LoadingProgress
+          localLabel={sorting ? "Sorting result page…" : undefined}
+        />
         <header className="topbar">
           <div className="breadcrumbs">
             <span>Workspace</span>
@@ -1476,7 +1487,7 @@ function App() {
                             statement(s) · {active.execution.elapsedMs} ms
                           </span>
                           {active.execution.results.length > 1 && (
-                            <select
+                            <Select
                               aria-label="Statement result"
                               disabled={!!inlineRow || !!busy}
                               value={Math.max(
@@ -1506,7 +1517,7 @@ function App() {
                                   · affected: {r.affectedRows ?? "—"}
                                 </option>
                               ))}
-                            </select>
+                            </Select>
                           )}
                         </div>
                         {active.execution.omittedResults > 0 && (
@@ -1803,7 +1814,7 @@ function App() {
                             tab={active}
                             rows={rows}
                             sort={sort}
-                            onSort={setSort}
+                            onSort={(next) => startSorting(() => setSort(next))}
                             onTableSort={(column, direction) => {
                               const details = tableDetailsCache.peek(
                                 active.profileId,
@@ -1894,13 +1905,15 @@ function App() {
                                       <button
                                         title="Sort current result page"
                                         onClick={() =>
-                                          setSort({
-                                            index: i,
-                                            asc:
-                                              sort?.index === i
-                                                ? !sort.asc
-                                                : true,
-                                          })
+                                          startSorting(() =>
+                                            setSort({
+                                              index: i,
+                                              asc:
+                                                sort?.index === i
+                                                  ? !sort.asc
+                                                  : true,
+                                            }),
+                                          )
                                         }
                                       >
                                         <span>
@@ -2410,12 +2423,25 @@ function ConnectionDialog({
       const saved = await api<Profile>("save_connection", {
         profile: p,
         password: password || null,
+        sshPassword: sshPassword || null,
       });
       setPassword("");
       setSshPassword("");
       onSaved(saved);
     } catch (e) {
       setError(String(e));
+    } finally {
+      setWorking("");
+    }
+  }
+  async function revealPassword(kind: "database" | "ssh") {
+    setWorking("reveal");
+    setError("");
+    try {
+      return await api<string>("reveal_connection_password", {
+        id: initial.id,
+        kind,
+      });
     } finally {
       setWorking("");
     }
@@ -2429,7 +2455,7 @@ function ConnectionDialog({
       if (testOnly) {
         await api("test_connection", {
           profile: p,
-          password,
+          password: password || null,
           sshPassword: sshPassword || null,
         });
         setTested(true);
@@ -2593,20 +2619,25 @@ function ConnectionDialog({
                 </label>
                 <label>
                   Password
-                  <input
-                    type="password"
-                    autoComplete="off"
+                  <PasswordInput
+                    label="Database password"
+                    value={password}
+                    disabled={!!working}
                     placeholder={
                       initial.rememberPassword
                         ? "Leave blank to keep saved password"
                         : "Database password"
                     }
-                    value={password}
-                    disabled={!!working}
-                    onChange={(e) => {
-                      setPassword(e.target.value);
+                    onChange={(value) => {
+                      setPassword(value);
                       setTested(false);
                     }}
+                    revealSaved={
+                      saved && initial.rememberPassword
+                        ? () => revealPassword("database")
+                        : undefined
+                    }
+                    onError={setError}
                   />
                 </label>
               </div>
@@ -2669,7 +2700,8 @@ function ConnectionDialog({
                   </label>
                   <label>
                     SSH authentication
-                    <select
+                    <Select
+                      aria-label="SSH authentication"
                       value={p.ssh.authentication || "key"}
                       onChange={(e) =>
                         change({
@@ -2683,25 +2715,36 @@ function ConnectionDialog({
                     >
                       <option value="key">Private key / SSH agent</option>
                       <option value="password">Password</option>
-                    </select>
+                    </Select>
                   </label>
                   {p.ssh.authentication === "password" ? (
                     <label>
                       SSH password
-                      <input
-                        type="password"
-                        autoComplete="off"
+                      <PasswordInput
+                        label="SSH password"
                         value={sshPassword}
-                        placeholder="SSH server password"
-                        onChange={(e) => {
-                          setSshPassword(e.target.value);
+                        disabled={!!working}
+                        placeholder={
+                          initial.rememberPassword
+                            ? "Leave blank to keep saved SSH password"
+                            : "SSH server password"
+                        }
+                        onChange={(value) => {
+                          setSshPassword(value);
                           setTested(false);
                           setError("");
                         }}
+                        revealSaved={
+                          saved &&
+                          initial.rememberPassword &&
+                          initial.ssh?.authentication === "password"
+                            ? () => revealPassword("ssh")
+                            : undefined
+                        }
+                        onError={setError}
                       />
                       <small>
-                        Enter when connecting. Kept in memory during
-                        authentication.
+                        Enable Remember passwords to save in macOS Keychain.
                       </small>
                     </label>
                   ) : (
@@ -2776,8 +2819,10 @@ function ConnectionDialog({
                     }
                   />
                   <span>
-                    Remember password
-                    <small>Store securely in macOS Keychain</small>
+                    Remember passwords
+                    <small>
+                      Store database and SSH passwords in macOS Keychain
+                    </small>
                   </span>
                   <KeyRound size={15} />
                 </label>
@@ -2806,7 +2851,7 @@ function ConnectionDialog({
             <ShieldCheck size={14} />
             <p>
               Save keeps settings on this device without connecting. Passwords
-              are stored only when Remember password is selected. SQL follows
+              are stored only when Remember passwords is selected. SQL follows
               database or file permissions.
             </p>
           </div>

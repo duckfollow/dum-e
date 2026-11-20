@@ -89,7 +89,7 @@
   outline-offset: -1px;
 }
 .grid-cell-editor input,
-.grid-cell-editor select {
+.grid-cell-editor .select-trigger {
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--line);
@@ -102,7 +102,7 @@
   flex: 1;
   width: 120px;
 }
-.grid-cell-editor select:last-child {
+.grid-cell-editor .select-trigger:last-child {
   width: 72px;
   flex-shrink: 0;
 }
@@ -188,7 +188,7 @@
   line-height: 1.55;
   tab-size: 2;
 }
-.grid-json-actions select {
+.grid-json-actions .select-trigger {
   margin-inline-end: auto;
 }
 .grid-json-editor textarea:focus-visible {

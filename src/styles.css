@@ -1621,7 +1621,7 @@ p {
   align-items: center;
   flex-wrap: wrap;
 }
-.execution-summary select {
+.execution-summary .select-trigger {
   margin-left: auto;
   max-width: 100%;
   background: var(--bg);
@@ -1776,7 +1776,7 @@ p {
   font-size: 12px;
 }
 .column-filter-fields input,
-.column-filter-fields select {
+.column-filter-fields .select-trigger {
   width: 100%;
   padding: 7px 9px;
   border: 1px solid var(--line);
@@ -1862,7 +1862,7 @@ p {
   min-width: 0;
 }
 
-.ssh-settings select {
+.ssh-settings .select-trigger {
   width: 100%;
   padding: 10px 11px;
   font-size: 12px;
@@ -1871,7 +1871,150 @@ p {
   background: var(--editor);
   color: var(--text);
 }
-.ssh-settings select:focus-visible {
+.ssh-settings .select-trigger:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
+}
+
+.password-input {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--editor);
+}
+.password-input:focus-within {
+  border-color: var(--accent);
+}
+.password-input input {
+  width: 100%;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  padding: 10px 11px;
+}
+.password-input button {
+  margin-right: 5px;
+  flex-shrink: 0;
+}
+select.select-native {
+  display: none;
+}
+.select-trigger {
+  min-width: 0;
+  display: inline-flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--editor);
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+}
+.select-trigger > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.select-trigger > svg {
+  color: var(--muted);
+}
+.select-trigger[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+.select-menu {
+  position: fixed;
+  z-index: 10000;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  outline: none;
+}
+.select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  padding: 7px 9px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.select-option.active {
+  background: var(--accent-dim);
+}
+.select-option[aria-selected="true"] {
+  color: var(--accent);
+}
+.select-option[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.loading-progress {
+  flex-shrink: 0;
+  background: var(--panel);
+  color: var(--secondary);
+  border-bottom: 1px solid var(--line);
+}
+.loading-progress-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 7px 18px;
+  font-size: 12px;
+}
+.loading-progress-status > svg {
+  color: var(--accent);
+}
+.loading-progress-count {
+  color: var(--muted);
+  font-size: 11px;
+}
+.loading-progress-status time {
+  margin-left: auto;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.loading-progress-track {
+  height: 3px;
+  overflow: hidden;
+  background: var(--accent-dim);
+}
+.loading-progress-track > span {
+  display: block;
+  width: 35%;
+  height: 100%;
+  background: var(--accent);
+  animation: loading-progress-travel 1.4s ease-in-out infinite;
+}
+@keyframes loading-progress-travel {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(386%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .loading-progress-track > span {
+    animation: none;
+    width: 100%;
+    opacity: 0.65;
+  }
+  .loading-progress-status > .spin {
+    animation: none;
+  }
 }

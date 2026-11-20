@@ -90,33 +90,118 @@ async fn stored_password(id: String) -> Result<String, String> {
         Err("Password storage is currently available on macOS only.".into())
     }
 }
-async fn save_password(id: String, password: String, remember: bool) -> Result<(), String> {
+#[cfg(target_os = "macos")]
+fn write_keychain_password(
+    entry: &keyring::Entry,
+    password: Option<&str>,
+) -> Result<(), keyring::Error> {
+    match password {
+        Some(password) => entry.set_password(password),
+        None => match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(error),
+        },
+    }
+}
+async fn save_passwords(updates: Vec<(String, Option<String>)>) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
+        // Keep the two credential updates together, including rollback if either fails.
+        static WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        let _guard = WRITES.lock().await;
         tauri::async_runtime::spawn_blocking(move || {
-            let e = password_entry(&id)?;
-            if remember {
-                e.set_password(&password)
-                    .map_err(|e| format!("Keychain: {e}"))
-            } else {
-                match e.delete_credential() {
-                    Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-                    Err(e) => Err(format!("Keychain: {e}")),
+            let mut entries = Vec::new();
+            for (id, _) in &updates {
+                let entry = password_entry(id)?;
+                let previous = match entry.get_password() {
+                    Ok(password) => Some(password),
+                    Err(keyring::Error::NoEntry) => None,
+                    Err(error) => return Err(format!("Keychain: {error}")),
+                };
+                entries.push((entry, previous));
+            }
+            for (index, ((entry, _), (_, password))) in entries.iter().zip(&updates).enumerate() {
+                if let Err(error) = write_keychain_password(entry, password.as_deref()) {
+                    let mut message = format!("Keychain: {error}");
+                    for (entry, previous) in entries[..=index].iter().rev() {
+                        if let Err(restore_error) =
+                            write_keychain_password(entry, previous.as_deref())
+                        {
+                            message.push_str(&format!(
+                                ". Could not restore a previous credential: {restore_error}"
+                            ));
+                        }
+                    }
+                    return Err(message);
                 }
             }
+            Ok(())
         })
         .await
         .map_err(|e| e.to_string())?
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (id, password);
-        if remember {
+        if updates.iter().any(|(_, password)| password.is_some()) {
             Err("Password storage is currently available on macOS only.".into())
         } else {
             Ok(())
         }
     }
+}
+fn ssh_password_id(id: &str) -> String {
+    format!("{id}:ssh")
+}
+fn remembers_ssh_password(profile: &Profile) -> bool {
+    profile.driver == "postgres"
+        && profile.remember_password
+        && profile
+            .ssh
+            .as_ref()
+            .is_some_and(|ssh| ssh.authentication == ssh::SshAuthentication::Password)
+}
+async fn connection_passwords(
+    profile: &Profile,
+    password: Option<String>,
+    ssh_password: Option<String>,
+) -> Result<(String, Option<String>), String> {
+    let password = match password {
+        Some(password) => password,
+        None if profile.driver == "postgres" && profile.remember_password => {
+            stored_password(profile.id.clone()).await?
+        }
+        None => String::new(),
+    };
+    let ssh_password = match ssh_password {
+        Some(password) => Some(password),
+        None if remembers_ssh_password(profile) => {
+            Some(stored_password(ssh_password_id(&profile.id)).await?)
+        }
+        None => None,
+    };
+    Ok((password, ssh_password))
+}
+async fn save_connection_passwords(
+    profile: &Profile,
+    password: Option<String>,
+    ssh_password: Option<String>,
+) -> Result<(), String> {
+    let mut updates = Vec::new();
+    let remember_database = profile.driver == "postgres" && profile.remember_password;
+    if !remember_database || password.is_some() {
+        updates.push((
+            profile.id.clone(),
+            if remember_database { password } else { None },
+        ));
+    }
+    let remember_ssh = remembers_ssh_password(profile);
+    if !remember_ssh || ssh_password.is_some() {
+        updates.push((
+            ssh_password_id(&profile.id),
+            if remember_ssh { ssh_password } else { None },
+        ));
+    }
+    save_passwords(updates).await
 }
 #[tauri::command]
 fn list_connections(
@@ -132,6 +217,7 @@ async fn save_connection(
     state: tauri::State<'_, Workspace>,
     mut profile: Profile,
     password: Option<String>,
+    ssh_password: Option<String>,
 ) -> Result<Profile, String> {
     profile.validate()?;
     if state
@@ -144,24 +230,8 @@ async fn save_connection(
     }
     if profile.driver == "sqlite" {
         profile.remember_password = false;
-        let previously_postgres = {
-            let _guard = state.storage.lock().map_err(|_| "Storage busy")?;
-            read_profiles(&app)?
-                .iter()
-                .any(|p| p.id == profile.id && p.driver == "postgres")
-        };
-        if previously_postgres {
-            save_password(profile.id.clone(), String::new(), false).await?;
-        }
     }
-    if profile.driver == "postgres" {
-        if !profile.remember_password {
-            save_password(profile.id.clone(), String::new(), false).await?;
-        } else if let Some(password) = password {
-            save_password(profile.id.clone(), password, true).await?;
-        }
-        // None preserves an existing Keychain entry; saving does not contact the server.
-    }
+    save_connection_passwords(&profile, password, ssh_password).await?;
     let _guard = state.storage.lock().map_err(|_| "Storage busy")?;
     persist(&app, &profile)?;
     Ok(profile)
@@ -188,18 +258,47 @@ async fn remove_connection(
     if !exists {
         return Ok(());
     }
-    save_password(id.clone(), String::new(), false).await?;
+    save_passwords(vec![(id.clone(), None), (ssh_password_id(&id), None)]).await?;
     let _guard = state.storage.lock().map_err(|_| "Storage busy")?;
     let mut profiles = read_profiles(&app)?;
     profiles.retain(|p| p.id != id);
     write_profiles(&saved_path(&app)?, &profiles)
 }
+fn reveal_password_id(profile: &Profile, kind: &str) -> Result<String, String> {
+    match kind {
+        "database" if profile.driver == "postgres" && profile.remember_password => {
+            Ok(profile.id.clone())
+        }
+        "ssh" if remembers_ssh_password(profile) => Ok(ssh_password_id(&profile.id)),
+        _ => Err("There is no saved password for this authentication method.".into()),
+    }
+}
+#[tauri::command]
+async fn reveal_connection_password(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Workspace>,
+    id: String,
+    kind: String,
+) -> Result<String, String> {
+    uuid::Uuid::parse_str(&id).map_err(|_| "Invalid connection identifier")?;
+    let profile = {
+        let _guard = state.storage.lock().map_err(|_| "Storage busy")?;
+        read_profiles(&app)?
+            .into_iter()
+            .find(|profile| profile.id == id)
+            .ok_or("Saved connection not found")?
+    };
+    let credential_id = reveal_password_id(&profile, &kind)?;
+    stored_password(credential_id).await
+}
 #[tauri::command]
 async fn test_connection(
     profile: Profile,
-    password: String,
+    password: Option<String>,
     ssh_password: Option<String>,
 ) -> Result<(), String> {
+    profile.validate()?;
+    let (password, ssh_password) = connection_passwords(&profile, password, ssh_password).await?;
     db::test_connection(&profile, &password, ssh_password.as_deref()).await
 }
 #[tauri::command]
@@ -211,27 +310,11 @@ async fn connect_database(
     ssh_password: Option<String>,
 ) -> Result<Connected, String> {
     profile.validate()?;
-    let password = match password {
-        Some(p) => p,
-        None => {
-            if profile.driver == "postgres" && profile.remember_password {
-                stored_password(profile.id.clone()).await?
-            } else {
-                String::new()
-            }
-        }
-    };
+    let (password, ssh_password) = connection_passwords(&profile, password, ssh_password).await?;
     profile.tunnel = ssh::open(&profile, ssh_password.as_deref()).await?;
     let tables = db::tables(&profile, &password).await?;
     let schemas = db::schemas(&profile, &password).await?;
-    if profile.driver == "postgres" {
-        save_password(
-            profile.id.clone(),
-            password.clone(),
-            profile.remember_password,
-        )
-        .await?;
-    }
+    save_connection_passwords(&profile, Some(password.clone()), ssh_password).await?;
     {
         let _guard = state.storage.lock().map_err(|_| "Storage busy")?;
         persist(&app, &profile)?;
@@ -507,6 +590,7 @@ pub fn run() {
             save_connection,
             remove_connection,
             test_connection,
+            reveal_connection_password,
             connect_database,
             disconnect_database,
             list_tables,
@@ -539,6 +623,104 @@ pub fn run() {
 #[cfg(test)]
 mod connection_storage_tests {
     use super::*;
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    #[ignore = "Uses isolated temporary macOS Keychain entries"]
+    async fn keychain_remembers_database_and_ssh_passwords() {
+        struct Cleanup(String);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                for id in [self.0.clone(), ssh_password_id(&self.0)] {
+                    if let Ok(entry) = password_entry(&id) {
+                        let _ = entry.delete_credential();
+                    }
+                }
+            }
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let _cleanup = Cleanup(id.clone());
+        let mut profile: Profile = serde_json::from_value(serde_json::json!({
+            "id": id, "name": "Temporary Keychain test", "driver": "postgres",
+            "host": "127.0.0.1", "database": "fixture", "username": "fixture", "rememberPassword": true,
+            "ssh": { "host": "127.0.0.1", "port": 22, "username": "fixture", "authentication": "password" }
+        })).unwrap();
+        save_connection_passwords(
+            &profile,
+            Some("fixture-db-password".into()),
+            Some("fixture-ssh-password".into()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            stored_password(reveal_password_id(&profile, "database").unwrap())
+                .await
+                .unwrap(),
+            "fixture-db-password"
+        );
+        assert_eq!(
+            stored_password(reveal_password_id(&profile, "ssh").unwrap())
+                .await
+                .unwrap(),
+            "fixture-ssh-password"
+        );
+        assert!(reveal_password_id(&profile, "unknown").is_err());
+        let (database, ssh) = connection_passwords(&profile, None, None).await.unwrap();
+        assert_eq!(database, "fixture-db-password");
+        assert_eq!(ssh.as_deref(), Some("fixture-ssh-password"));
+        save_connection_passwords(&profile, None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            connection_passwords(&profile, None, None).await.unwrap(),
+            (database, ssh)
+        );
+        let override_values =
+            connection_passwords(&profile, Some("typed-db".into()), Some("typed-ssh".into()))
+                .await
+                .unwrap();
+        assert_eq!(
+            override_values,
+            ("typed-db".into(), Some("typed-ssh".into()))
+        );
+        assert_eq!(
+            stored_password(profile.id.clone()).await.unwrap(),
+            "fixture-db-password"
+        );
+        let json = serde_json::to_string(&profile).unwrap();
+        assert!(!json.contains("fixture-db-password"));
+        assert!(!json.contains("fixture-ssh-password"));
+        profile.ssh.as_mut().unwrap().authentication = ssh::SshAuthentication::Key;
+        save_connection_passwords(&profile, None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            stored_password(ssh_password_id(&profile.id)).await.unwrap(),
+            ""
+        );
+        assert_eq!(
+            stored_password(profile.id.clone()).await.unwrap(),
+            "fixture-db-password"
+        );
+        profile.ssh.as_mut().unwrap().authentication = ssh::SshAuthentication::Password;
+        save_connection_passwords(&profile, None, Some("updated-ssh".into()))
+            .await
+            .unwrap();
+        profile.remember_password = false;
+        assert!(reveal_password_id(&profile, "database").is_err());
+        assert!(reveal_password_id(&profile, "ssh").is_err());
+        save_connection_passwords(&profile, None, None)
+            .await
+            .unwrap();
+        assert_eq!(stored_password(profile.id.clone()).await.unwrap(), "");
+        assert_eq!(
+            stored_password(ssh_password_id(&profile.id)).await.unwrap(),
+            ""
+        );
+        assert_eq!(
+            connection_passwords(&profile, None, None).await.unwrap(),
+            (String::new(), None)
+        );
+    }
     #[test]
     fn removing_profile_preserves_other_settings_and_writes_empty_list() {
         let dir = std::env::temp_dir().join(format!("dum-e-storage-test-{}", uuid::Uuid::new_v4()));
