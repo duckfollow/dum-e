@@ -1,0 +1,13 @@
+npm notice run dum-e@0.1.0-alpha.6 test:postgres
+npm notice run node scripts/test-postgres.mjs
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.58s
+     Running unittests src/lib.rs (src-tauri/target/debug/deps/dum_e_lib-8a1b1e324bf3cf99)
+
+running 4 tests
+test metadata::tests::postgres_real_metadata ... ok
+test db::tests::postgres_real_connection_types_and_readonly ... ok
+test execution::tests::postgres_real_full_sql_scripts_and_rollback ... ok
+test editing::tests::postgres_real_cell_edits_atomic_composite_conflict_and_constraints ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 3.45s
+

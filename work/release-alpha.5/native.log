@@ -1,0 +1,26 @@
+npm notice run dum-e@0.1.0-alpha.5 test:native
+npm notice run cargo test --manifest-path src-tauri/Cargo.toml --lib
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.74s
+     Running unittests src/lib.rs (src-tauri/target/debug/deps/dum_e_lib-f4a2c3d7c3ea400f)
+
+running 17 tests
+test db::tests::postgres_real_connection_types_and_readonly ... ignored, requires isolated PostgreSQL; set DUM_E_TEST_PG_PORT
+test editing::tests::postgres_real_cell_edits_atomic_composite_conflict_and_constraints ... ignored, requires isolated PostgreSQL; run npm run test:postgres
+test execution::tests::postgres_real_full_sql_scripts_and_rollback ... ignored, requires isolated PostgreSQL; set DUM_E_TEST_PG_PORT
+test metadata::tests::postgres_real_metadata ... ignored, requires isolated PostgreSQL; set DUM_E_TEST_PG_PORT
+test db::tests::identifier_and_query_boundaries ... ok
+test metadata::tests::sqlite_catalog_preserves_composite_and_self_relations_and_indexes ... ok
+test connection_storage_tests::removing_profile_preserves_other_settings_and_writes_empty_list ... ok
+test updates::tests::preview_builds_receive_newer_previews_and_stable ... ok
+test updates::tests::release_notes_are_preserved_and_optional_in_github_response ... ok
+test updates::tests::stable_skips_previews_drafts_invalid_and_build_metadata ... ok
+test db::tests::sqlite_cancels_expensive_query_and_keeps_empty_columns ... ok
+test execution::tests::sqlite_scripts_ddl_dml_returning_and_readonly_boundary ... ok
+test execution::tests::sqlite_returning_is_drained_and_explicit_transactions_are_run_scoped ... ok
+test db::tests::sqlite_real_data_types_bounds_and_readonly ... ok
+test relations::tests::sqlite_database_overview_includes_isolated_composite_and_self_links ... ok
+test metadata::tests::sqlite_nullability_strict_and_untrusted_names_are_reported_accurately ... ok
+test editing::tests::sqlite_cell_edits_atomic_composite_conflict_and_constraints ... ok
+
+test result: ok. 13 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.08s
+

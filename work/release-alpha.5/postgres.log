@@ -1,0 +1,15 @@
+npm notice run dum-e@0.1.0-alpha.5 test:postgres
+npm notice run node scripts/test-postgres.mjs
+    Blocking waiting for file lock on build directory
+   Compiling dum-e v0.1.0-alpha.5 (/Users/tankps/Documents/project-github/dum-e/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 17.32s
+     Running unittests src/lib.rs (src-tauri/target/debug/deps/dum_e_lib-f4a2c3d7c3ea400f)
+
+running 4 tests
+test metadata::tests::postgres_real_metadata ... ok
+test db::tests::postgres_real_connection_types_and_readonly ... ok
+test execution::tests::postgres_real_full_sql_scripts_and_rollback ... ok
+test editing::tests::postgres_real_cell_edits_atomic_composite_conflict_and_constraints ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 5.07s
+

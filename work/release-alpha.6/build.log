@@ -1,0 +1,40 @@
+npm notice run dum-e@0.1.0-alpha.6 build
+npm notice run tauri build && node scripts/verify-macos-bundle.mjs
+        Info Looking up installed tauri packages to check mismatched versions...
+     Running beforeBuildCommand `npm run build:web`
+npm notice run dum-e@0.1.0-alpha.6 build:web
+npm notice run tsc --noEmit && vite build
+vite v6.4.5 building for production...
+transforming...
+✓ 2007 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.68 kB │ gzip:   0.38 kB
+dist/assets/u-CgxvS9t1.png        5.55 kB
+dist/assets/edith-DxBwCCFm.png    6.47 kB
+dist/assets/index-Bfz0fjpN.css   66.23 kB │ gzip:  12.76 kB
+dist/assets/index-_K4B0A58.js   170.07 kB │ gzip:  52.60 kB
+dist/assets/react-DwGs8llC.js   223.22 kB │ gzip:  69.25 kB
+dist/assets/editor-B2iWZyqT.js  433.95 kB │ gzip: 143.28 kB
+✓ built in 1.58s
+   Compiling dum-e v0.1.0-alpha.6 (/Users/tankps/Documents/project-github/dum-e/src-tauri)
+    Finished `release` profile [optimized] target(s) in 26.73s
+       Built application at: /Users/tankps/Documents/project-github/dum-e/src-tauri/target/release/Dum-E
+    Bundling Dum-E.app (/Users/tankps/Documents/project-github/dum-e/src-tauri/target/release/bundle/macos/Dum-E.app)
+     Signing with identity "-"
+Signing with identity "-"
+Signing /Users/tankps/Documents/project-github/dum-e/src-tauri/target/release/bundle/macos/Dum-E.app/Contents/MacOS/Dum-E
+/Users/tankps/Documents/project-github/dum-e/src-tauri/target/release/bundle/macos/Dum-E.app/Contents/MacOS/Dum-E: replacing existing signature
+Signing with identity "-"
+Signing /Users/tankps/Documents/project-github/dum-e/src-tauri/target/release/bundle/macos/Dum-E.app
+/Users/tankps/Documents/project-github/dum-e/src-tauri/target/release/bundle/macos/Dum-E.app: replacing existing signature
+        Warn skipping app notarization, no APPLE_ID & APPLE_PASSWORD & APPLE_TEAM_ID or APPLE_API_KEY & APPLE_API_ISSUER & APPLE_API_KEY_PATH environment variables found
+    Bundling Dum-E_0.1.0-alpha.6_aarch64.dmg (/Users/tankps/Documents/project-github/dum-e/src-tauri/target/release/bundle/dmg/Dum-E_0.1.0-alpha.6_aarch64.dmg)
+     Running bundle_dmg.sh
+    Finished 2 bundles at:
+        /Users/tankps/Documents/project-github/dum-e/src-tauri/target/release/bundle/macos/Dum-E.app (26.66 MiB)
+        /Users/tankps/Documents/project-github/dum-e/src-tauri/target/release/bundle/dmg/Dum-E_0.1.0-alpha.6_aarch64.dmg (9.27 MiB)
+
+/Users/tankps/Documents/project-github/dum-e/src-tauri/target/release/bundle/macos/Dum-E.app: valid on disk
+/Users/tankps/Documents/project-github/dum-e/src-tauri/target/release/bundle/macos/Dum-E.app: satisfies its Designated Requirement
+App bundle signature is valid. Public distribution still requires Developer ID signing and notarization.
