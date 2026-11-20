@@ -3,6 +3,7 @@ mod editing;
 mod execution;
 mod metadata;
 mod relations;
+mod ssh;
 mod updates;
 use db::{Profile, QueryResult, Table};
 use serde::Serialize;
@@ -194,15 +195,20 @@ async fn remove_connection(
     write_profiles(&saved_path(&app)?, &profiles)
 }
 #[tauri::command]
-async fn test_connection(profile: Profile, password: String) -> Result<(), String> {
-    db::test_connection(&profile, &password).await
+async fn test_connection(
+    profile: Profile,
+    password: String,
+    ssh_password: Option<String>,
+) -> Result<(), String> {
+    db::test_connection(&profile, &password, ssh_password.as_deref()).await
 }
 #[tauri::command]
 async fn connect_database(
     app: tauri::AppHandle,
     state: tauri::State<'_, Workspace>,
-    profile: Profile,
+    mut profile: Profile,
     password: Option<String>,
+    ssh_password: Option<String>,
 ) -> Result<Connected, String> {
     profile.validate()?;
     let password = match password {
@@ -215,6 +221,7 @@ async fn connect_database(
             }
         }
     };
+    profile.tunnel = ssh::open(&profile, ssh_password.as_deref()).await?;
     let tables = db::tables(&profile, &password).await?;
     let schemas = db::schemas(&profile, &password).await?;
     if profile.driver == "postgres" {
@@ -434,8 +441,10 @@ async fn open_sample(
         path: path.to_string_lossy().into_owned(),
         tls: true,
         remember_password: false,
+        ssh: None,
+        tunnel: None,
     };
-    connect_database(app, state, profile, Some(String::new())).await
+    connect_database(app, state, profile, Some(String::new()), None).await
 }
 #[tauri::command]
 async fn export_result(
@@ -511,8 +520,20 @@ pub fn run() {
             open_sample,
             export_result
         ])
-        .run(tauri::generate_context!())
-        .expect("Unable to start Dum-E");
+        .build(tauri::generate_context!())
+        .expect("Unable to start Dum-E")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                let workspace = app.state::<Workspace>();
+                if let Ok(sessions) = workspace.sessions.lock() {
+                    for session in sessions.values() {
+                        if let Some(tunnel) = &session.profile.tunnel {
+                            tunnel.stop();
+                        }
+                    }
+                };
+            }
+        });
 }
 
 #[cfg(test)]
@@ -534,6 +555,8 @@ mod connection_storage_tests {
             path: "/unused-test.sqlite".into(),
             tls: false,
             remember_password: false,
+            ssh: None,
+            tunnel: None,
         };
         let first = make("first");
         let second = make("second");

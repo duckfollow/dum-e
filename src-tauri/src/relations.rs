@@ -179,6 +179,8 @@ mod tests {
             username: String::new(),
             tls: true,
             remember_password: false,
+            ssh: None,
+            tunnel: None,
         };
         let data = inspect(&p, "").await.unwrap();
         assert_eq!(data.tables.len(), 7);

@@ -771,6 +771,8 @@ mod tests {
             path: file.0.to_string_lossy().into(),
             tls: true,
             remember_password: false,
+            ssh: None,
+            tunnel: None,
         };
         exercise(&p, "", "main").await;
         exercise_crud(&p, "", "main").await;
@@ -808,6 +810,8 @@ mod tests {
             path: String::new(),
             tls: false,
             remember_password: false,
+            ssh: None,
+            tunnel: None,
         };
         let schema = format!("edit_{}", uuid::Uuid::new_v4().simple());
         sql(

@@ -553,7 +553,10 @@ function App() {
       else newQuery(p.id);
       return;
     }
-    if (p.driver === "postgres" && !p.rememberPassword) {
+    if (
+      p.driver === "postgres" &&
+      (!p.rememberPassword || p.ssh?.authentication === "password")
+    ) {
       setModal(p);
       return;
     }
@@ -2365,6 +2368,7 @@ function ConnectionDialog({
 }) {
   const [p, setP] = useState(initial),
     [password, setPassword] = useState(""),
+    [sshPassword, setSshPassword] = useState(""),
     [working, setWorking] = useState(""),
     [error, setError] = useState(""),
     [tested, setTested] = useState(false);
@@ -2373,6 +2377,7 @@ function ConnectionDialog({
     dialog.current?.showModal();
   }, []);
   const change = (value: Partial<Profile>) => {
+    if ("ssh" in value || "driver" in value) setSshPassword("");
     setP((p) => ({ ...p, ...value }));
     setTested(false);
     setError("");
@@ -2407,6 +2412,7 @@ function ConnectionDialog({
         password: password || null,
       });
       setPassword("");
+      setSshPassword("");
       onSaved(saved);
     } catch (e) {
       setError(String(e));
@@ -2421,16 +2427,22 @@ function ConnectionDialog({
     setTested(false);
     try {
       if (testOnly) {
-        await api("test_connection", { profile: p, password });
+        await api("test_connection", {
+          profile: p,
+          password,
+          sshPassword: sshPassword || null,
+        });
         setTested(true);
       } else {
         await onConnected(
           await api<Connected>("connect_database", {
             profile: p,
             password: password || null,
+            sshPassword: sshPassword || null,
           }),
         );
         setPassword("");
+        setSshPassword("");
       }
     } catch (e) {
       setError(String(e));
@@ -2598,6 +2610,144 @@ function ConnectionDialog({
                   />
                 </label>
               </div>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={!!p.ssh}
+                  disabled={!!working}
+                  onChange={(e) =>
+                    change({
+                      ssh: e.target.checked
+                        ? { host: "", port: 22, username: "", identityFile: "" }
+                        : undefined,
+                    })
+                  }
+                />
+                <span>Connect via SSH</span>
+              </label>
+              {p.ssh && (
+                <fieldset className="ssh-settings" disabled={!!working}>
+                  <legend>SSH tunnel</legend>
+                  <div className="form-row">
+                    <label>
+                      SSH host
+                      <input
+                        required
+                        value={p.ssh.host}
+                        placeholder="bastion.example.com"
+                        onChange={(e) =>
+                          change({ ssh: { ...p.ssh!, host: e.target.value } })
+                        }
+                      />
+                    </label>
+                    <label className="port-label">
+                      SSH port
+                      <input
+                        required
+                        type="number"
+                        min={1}
+                        max={65535}
+                        value={p.ssh.port}
+                        onChange={(e) =>
+                          change({
+                            ssh: { ...p.ssh!, port: Number(e.target.value) },
+                          })
+                        }
+                      />
+                    </label>
+                  </div>
+                  <label>
+                    SSH username
+                    <input
+                      required
+                      autoComplete="off"
+                      value={p.ssh.username}
+                      onChange={(e) =>
+                        change({ ssh: { ...p.ssh!, username: e.target.value } })
+                      }
+                    />
+                  </label>
+                  <label>
+                    SSH authentication
+                    <select
+                      value={p.ssh.authentication || "key"}
+                      onChange={(e) =>
+                        change({
+                          ssh: {
+                            ...p.ssh!,
+                            authentication: e.target.value as
+                              "key" | "password",
+                          },
+                        })
+                      }
+                    >
+                      <option value="key">Private key / SSH agent</option>
+                      <option value="password">Password</option>
+                    </select>
+                  </label>
+                  {p.ssh.authentication === "password" ? (
+                    <label>
+                      SSH password
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        value={sshPassword}
+                        placeholder="SSH server password"
+                        onChange={(e) => {
+                          setSshPassword(e.target.value);
+                          setTested(false);
+                          setError("");
+                        }}
+                      />
+                      <small>
+                        Enter when connecting. Kept in memory during
+                        authentication.
+                      </small>
+                    </label>
+                  ) : (
+                    <label>
+                      Private key
+                      <div className="file-input">
+                        <input
+                          value={p.ssh.identityFile}
+                          placeholder="Leave blank to use SSH agent"
+                          onChange={(e) =>
+                            change({
+                              ssh: { ...p.ssh!, identityFile: e.target.value },
+                            })
+                          }
+                        />
+                        <button
+                          type="button"
+                          disabled={!desktop}
+                          onClick={async () => {
+                            try {
+                              const path = await open({
+                                multiple: false,
+                                directory: false,
+                              });
+                              if (typeof path === "string")
+                                change({
+                                  ssh: { ...p.ssh!, identityFile: path },
+                                });
+                            } catch (e) {
+                              setError(String(e));
+                            }
+                          }}
+                        >
+                          <FolderOpen size={16} /> Browse
+                        </button>
+                      </div>
+                    </label>
+                  )}
+                  <p className="field-hint">
+                    Database host is reached from the SSH server. Verify the SSH
+                    host in Terminal first.{" "}
+                    {p.ssh.authentication !== "password" &&
+                      "Encrypted keys must be loaded in SSH agent."}
+                  </p>
+                </fieldset>
+              )}
               <div className="connection-options">
                 <label className="checkbox-label">
                   <input
@@ -2607,7 +2757,12 @@ function ConnectionDialog({
                     onChange={(e) => change({ tls: e.target.checked })}
                   />
                   <span>
-                    Verified TLS<small>Required for remote servers</small>
+                    Verified TLS
+                    <small>
+                      {p.ssh
+                        ? "Verify the database certificate through SSH"
+                        : "Required for remote servers"}
+                    </small>
                   </span>
                   <ShieldCheck size={15} />
                 </label>
@@ -2629,7 +2784,9 @@ function ConnectionDialog({
               </div>
               {!p.tls && (
                 <p className="field-hint">
-                  Unencrypted connections are supported for localhost only.
+                  {p.ssh
+                    ? "SSH encrypts traffic to the SSH server. TLS is disabled between that server and the database."
+                    : "Unencrypted connections are supported for localhost only."}
                 </p>
               )}
             </>

@@ -310,6 +310,8 @@ mod tests {
             path: path.to_string_lossy().into(),
             tls: true,
             remember_password: false,
+            ssh: None,
+            tunnel: None,
         }
     }
     fn flag() -> Arc<AtomicBool> {
@@ -403,6 +405,8 @@ mod tests {
             path: String::new(),
             tls: false,
             remember_password: false,
+            ssh: None,
+            tunnel: None,
         };
         let password = "dum-e-local-test-only";
         let refreshed = execute_mode(

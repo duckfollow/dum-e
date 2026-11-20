@@ -32,6 +32,8 @@ async fn fixture(sql: &str) -> Fixture {
         username: String::new(),
         tls: true,
         remember_password: false,
+        ssh: None,
+        tunnel: None,
     };
     Fixture { path, profile }
 }
@@ -170,6 +172,8 @@ async fn postgres_real_metadata() {
         path: String::new(),
         tls: false,
         remember_password: false,
+        ssh: None,
+        tunnel: None,
     };
     let details = inspect(
         &profile,

@@ -11,6 +11,13 @@ export interface Profile {
   path: string;
   tls: boolean;
   rememberPassword: boolean;
+  ssh?: {
+    host: string;
+    port: number;
+    username: string;
+    identityFile: string;
+    authentication?: "key" | "password";
+  };
 }
 export interface Table {
   schema: string;

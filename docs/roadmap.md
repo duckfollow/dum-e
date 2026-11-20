@@ -35,4 +35,4 @@ MongoDB is a separate document workspace: collection browser, Extended JSON docu
 
 ## Outside the early scope
 
-MySQL, unbounded/exportable ER diagrams, schema designer, plugin marketplace, cloud sync, team accounts, SSH tunnels, database administration, backup/restore, and AI query execution.
+MySQL, unbounded/exportable ER diagrams, schema designer, plugin marketplace, cloud sync, team accounts, database administration, backup/restore, and AI query execution.

@@ -39,7 +39,7 @@ The downloadable alpha is ad-hoc signed and **not notarized by Apple**. Gatekeep
 - Light, Dark, and System appearance.
 - A real SQLite sample database via **Explore a sample**.
 
-SQL runs directly with the connected database user or SQLite file permissions; no Full SQL toggle is required. MongoDB, SSH tunnels, and backup/restore are not implemented. Table SQL definitions are read-only previews. MySQL is intentionally out of scope. SQL tabs/results and query history live in memory and are discarded when the app exits. Explicitly saved scripts persist in local WebView storage.
+SQL runs directly with the connected database user or SQLite file permissions; no Full SQL toggle is required. MongoDB and backup/restore are not implemented. Table SQL definitions are read-only previews. MySQL is intentionally out of scope. SQL tabs/results and query history live in memory and are discarded when the app exits. Explicitly saved scripts persist in local WebView storage.
 
 ## Run locally
 
@@ -68,6 +68,16 @@ The packaged app talks directly to databases through native Rust commands. No se
 
 **PostgreSQL:** Enter name, host, port, database, username, and password. Verified TLS is enabled by default. TLS can be disabled for `localhost`, `127.0.0.1`, or `::1` only. Remote connections require a trusted certificate matching the hostname; self-signed/custom CA upload and client certificate authentication are not implemented yet. Remember password is opt-in and uses macOS Keychain.
 
+### PostgreSQL through SSH
+
+Enable **Connect via SSH** in the connection dialog. Enter the SSH server host, port and username, then choose Password or Private key / SSH agent. SSH passwords are entered separately from database passwords and kept in memory for connection setup. Saved connections using SSH passwords prompt for them again. For key authentication, select a private key or leave it blank to use SSH agent. Load encrypted keys into the agent first with `ssh-add /absolute/path/to/key`.
+
+Verify and trust the SSH host in Terminal once, using `ssh -p PORT USER@HOST`. Dum-E requires a matching entry in your OpenSSH `known_hosts` file. It uses the system OpenSSH client with explicit connection settings and does not load `~/.ssh/config`.
+
+The database host and port are resolved from the SSH server. For PostgreSQL on that same server, use `127.0.0.1` and its database port. Database credentials remain separate from SSH authentication. Saved profiles store the key path, never its contents or passphrase.
+
+Test connection opens a temporary tunnel. Save & connect keeps a tunnel for the session, including subsequent queries and edits. Disconnect releases it after in-flight operations finish. Exiting the app stops active session tunnels. Verified TLS continues to validate the original database hostname through the tunnel. If TLS is disabled, SSH encrypts only the connection to the SSH server, and the onward database connection has no TLS.
+
 ## Data and limits
 
 Connection metadata is stored at `~/Library/Application Support/com.duckfollow.dum-e/connections.json`, separately from EDITH. The file does not contain passwords. SQLite sample data is stored in the same folder as `workshop-sample-v2.sqlite` (previous sample files stay intact). Closing/disconnecting releases in-memory session credentials; active sessions are not restored automatically on launch.
@@ -91,9 +101,10 @@ npm run check
 npm test
 npm run test:native
 npm run test:postgres
+npm run test:ssh
 ```
 
-The last command requires Docker. It creates a disposable PostgreSQL 17 container on a random loopback port, seeds test-only data, runs the PostgreSQL integration test, and stops the container in `finally`. It never uses your saved connections.
+The integration commands require Docker. The PostgreSQL test creates a disposable PostgreSQL 17 container on a random loopback port, seeds test-only data, runs the PostgreSQL integration test, and stops the container in `finally`. It never uses your saved connections. The SSH integration test provisions a separate PostgreSQL/SSH container, generates temporary keys and a temporary known_hosts file, and removes the fixtures afterward.
 
 See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and [development notes](docs/development.md).
 

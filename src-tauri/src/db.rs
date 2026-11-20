@@ -31,6 +31,10 @@ pub struct Profile {
     pub tls: bool,
     #[serde(default)]
     pub remember_password: bool,
+    #[serde(default)]
+    pub ssh: Option<crate::ssh::SshConfig>,
+    #[serde(skip)]
+    pub tunnel: Option<Arc<crate::ssh::Tunnel>>,
 }
 fn default_port() -> u16 {
     5432
@@ -65,7 +69,14 @@ impl Profile {
                 if self.database.len() > 256 || self.username.len() > 256 {
                     return Err("Database or username is too long.".into());
                 }
-                if !self.tls && !["localhost", "127.0.0.1", "::1"].contains(&self.host.as_str()) {
+                if let Some(ssh) = &self.ssh {
+                    ssh.validate()?;
+                    crate::ssh::validate_host(&self.host)?;
+                }
+                if !self.tls
+                    && self.ssh.is_none()
+                    && !["localhost", "127.0.0.1", "::1"].contains(&self.host.as_str())
+                {
                     return Err("Remote PostgreSQL connections require verified TLS.".into());
                 }
             }
@@ -320,7 +331,7 @@ pub(crate) async fn postgres_mode(
     password: &str,
     writable: bool,
 ) -> Result<sqlx::PgConnection, String> {
-    let opts = sqlx::postgres::PgConnectOptions::new_without_pgpass()
+    let mut opts = sqlx::postgres::PgConnectOptions::new_without_pgpass()
         .host(&profile.host)
         .port(profile.port)
         .database(&profile.database)
@@ -341,6 +352,12 @@ pub(crate) async fn postgres_mode(
             ("lock_timeout", "3000"),
         ])
         .disable_statement_logging();
+    if let Some(tunnel) = &profile.tunnel {
+        tunnel.check()?;
+        // Forward over a private Unix socket while retaining the original host
+        // for SQLx VerifyFull certificate validation and TLS SNI.
+        opts = opts.socket(tunnel.directory());
+    }
     tokio::time::timeout(
         Duration::from_secs(8),
         sqlx::PgConnection::connect_with(&opts),
@@ -349,8 +366,15 @@ pub(crate) async fn postgres_mode(
     .map_err(|_| "Connection timed out after 8 seconds".to_string())?
     .map_err(|e| e.to_string())
 }
-pub async fn test_connection(profile: &Profile, password: &str) -> Result<(), String> {
+pub async fn test_connection(
+    profile: &Profile,
+    password: &str,
+    ssh_password: Option<&str>,
+) -> Result<(), String> {
     profile.validate()?;
+    let mut profile = profile.clone();
+    profile.tunnel = crate::ssh::open(&profile, ssh_password).await?;
+    let profile = &profile;
     if profile.driver == "sqlite" {
         let mut c = sqlite(profile, Arc::new(AtomicBool::new(false))).await?;
         c.execute("SELECT 1").await.map_err(|e| e.to_string())?;
@@ -616,6 +640,8 @@ mod tests {
             username: String::new(),
             tls: true,
             remember_password: false,
+            ssh: None,
+            tunnel: None,
         }
     }
     #[test]
@@ -686,8 +712,12 @@ mod tests {
             path: String::new(),
             tls: false,
             remember_password: false,
+            ssh: None,
+            tunnel: None,
         };
-        test_connection(&p, "dum-e-local-test-only").await.unwrap();
+        test_connection(&p, "dum-e-local-test-only", None)
+            .await
+            .unwrap();
         let r = query(&p,"dum-e-local-test-only", "SELECT 9007199254740993::bigint AS big, 1234567890.123456789::numeric AS exact, true AS ok, NULL::text AS empty, '{\"a\":1}'::jsonb AS doc, '2026-10-24'::date AS day",Arc::new(AtomicBool::new(false))).await.unwrap();
         assert_eq!(r.rows[0][0], json!("9007199254740993"));
         assert_eq!(r.rows[0][1], json!("1234567890.123456789"));
